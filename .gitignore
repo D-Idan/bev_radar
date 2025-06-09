@@ -56,11 +56,13 @@ configs/config.ini
 # External
 external/*
 
-# Images
+# Images, videos
 *.png
 *.jpg
+*.mp4
 
 # CSV, JSON results, zip files
 *.csv
 *.json
 *.zip
+
