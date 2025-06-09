@@ -16,7 +16,7 @@ from visualizations.track_viz import (
     visualize_all_frames_3d_overview,
     visualize_tracking_temporal_evolution, visualize_timing_analysis, visualize_tracking_during_gaps
 )
-from tracking_visualization import create_tracking_video
+from visualizations.tracking_visualization import create_tracking_video
 from visualizations.visualize_timing import plot_timing_analysis, plot_detailed_timing_analysis
 from utils.tracking_metrics import TrackingEvaluator
 
@@ -524,11 +524,7 @@ if __name__ == "__main__":
     from pathlib import Path
     import json
 
-    path_repo = Path('/Users/daniel/Idan/University/Masters/Thesis/2024/radar_sort/utils')
-    if not path_repo.exists():
-        path_repo = Path('/utils')
-
-    path_config_default = path_repo / Path('T_FFTRadNet/RadIal/ADCProcessing/data_config.json')
+    path_config_default = Path('ADCProcessing/data_config.json')
     config = json.load(open(path_config_default))
     record = config['target_value']
     root_folder = Path(config['Data_Dir'], 'RadIal_Data', record)
@@ -541,7 +537,7 @@ if __name__ == "__main__":
         'max_age': 3,
         'min_hits': 3,
         'iou_threshold': 6.0,
-        'base_dt': 0.1,  # 100ms base time step
+        'base_dt': 0.2,  # 100ms base time step
         'max_dt_gap': 0.5,  # Trigger multi-step prediction for gaps > 0.5s
 
         # Confidence-based parameters
@@ -560,9 +556,9 @@ if __name__ == "__main__":
     }
 
     args = {
-        'preds_csv': str(path_file_par / Path('../utils/T_FFTRadNet/RadIal/plots/predictions/all_predictions.csv')),
+        'preds_csv': str(path_file_par / Path('plots/predictions/all_predictions.csv')),
         'labels_csv': str(labels_csv),
-        'output_dir': str(path_file_par / Path('../utils/T_FFTRadNet/RadIal/plots/tracking_output')),
+        'output_dir': str(path_file_par / Path('plots/tracking_output')),
         'tracker_config': custom_tracker_config,
         'create_video': True,
         'max_video_samples': 50  # Limit video to first 50 samples for performance
