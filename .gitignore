@@ -1,0 +1,66 @@
+# IDE
+.vscode/
+.idea/
+
+# Data
+data/raw/
+data/processed/
+*.pkl
+*.h5
+*.bin
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs and outputs
+logs/
+outputs/
+results/
+*.log
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints
+#*.ipynb
+
+# Dataset cache
+.cache/
+
+# Config
+*.ini
+configs/config.ini
+*config*json
+
+# External
+external/*
+
+# Images
+*.png
+*.jpg
+
+# CSV, JSON results, zip files
+*.csv
+*.json
+*.zip
