@@ -1,0 +1,14 @@
+{
+	"Calibration": "/Volumes/ELEMENTS/datasets/radial/CalibrationTable.npy",
+
+	"Method": "ADC",
+
+	"label_path": "/Volumes/ELEMENTS/datasets/radial/labels_CVPR.csv",
+
+	"Data_Dir": "/Volumes/ELEMENTS/datasets/radial",
+
+	"Output_Folder": "/Volumes/ELEMENTS/datasets/radial/Extracted_Data",
+
+	"target_value": "RECORD@2020-11-22_12.45.05"
+
+}
