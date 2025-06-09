@@ -86,45 +86,8 @@ def main(config, checkpoint_filename,difficult):
 
         if data[4] is not None: # there is image
 
-            ### $$$$$$$ ### $$$$$$$### $$$$$$$### $$$$$$$### $$$$$$$### $$$$$$$### $$$$$$$### $$$$$$$### $$$$$$$
             model_outputs_dict[data[5]] = outputs
 
-            from pathlib import Path
-            import torch
-            from plots import dl_output_viz
-
-            path_repo = Path('/Users/daniel/Idan/University/Masters/Thesis/2024/radar_sort/utils')
-            dd = "/Volumes/ELEMENTS/datasets/radial"
-            record = "RECORD@2020-11-22_12.45.05"
-            if not path_repo.exists():
-                path_repo = Path('/utils')
-                dd = "/mnt/data/datasets/radial/gd/raw_data/"
-                record = "RECORD@2020-11-22_12.54.38"
-
-            root_folder = Path(dd, 'RadIal_Data', record)
-            ra_dir = Path(root_folder, 'radar_RA')
-            ra_path = Path(ra_dir) / f"ra_{data[-1]:06d}.npy"
-            # ra_map = np.load(ra_path)
-            #
-            # res_ra =  dl_output_viz.visualize_detections_on_bev(ra_map, outputs, enc, max_range=103)
-            # dl_output_viz.draw_boxes_on_RA_map(res_ra)
-            #
-            # res_ra = dl_output_viz.visualize_detections_on_ra_map(ra_map, outputs, enc)
-            # dl_output_viz.draw_boxes_on_RA_map(res_ra)
-            #
-            # res_img = dl_output_viz.visualize_detections_on_image(data[4], outputs, enc)
-            # dl_output_viz.draw_boxes_on_RA_map(res_img)
-            ### $$$$$$$### $$$$$$$### $$$$$$$### $$$$$$$### $$$$$$$### $$$$$$$### $$$$$$$### $$$$$$$### $$$$$$$
-
-
-            # hmi = DisplayHMI(data[4], data[0],outputs,enc,config,intermediate)
-            #
-            # cv2.imshow('FFTRadNet',hmi)
-            #
-            # # Press Q on keyboard to  exit
-            # if cv2.waitKey(25) & 0xFF == ord('q'):
-            #     break
-        # break
     batch_save_predictions(model_outputs_dict, enc, "plots/predictions/")
     cv2.destroyAllWindows()
 
