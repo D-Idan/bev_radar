@@ -197,46 +197,18 @@ class RadarTracker:
                                                            current_time - time_gap)
             track_time_gap = current_time - last_update
 
-            # Store prediction information for visualization
-            if track.id not in self.prediction_history:
-                self.prediction_history[track.id] = []
-                self.gap_predictions[track.id] = []
-
             if track_time_gap > self.max_dt_gap:
-                # Multi-step prediction for large gaps
                 predictions = self.kf.multi_step_predict(
-                    track.state, track.covariance,
-                    track_time_gap, self.base_dt
+                    track.state, track.covariance, track_time_gap, self.base_dt
                 )
-
-                # Store intermediate predictions for visualization
-                for i, (pred_state, pred_cov) in enumerate(predictions):
-                    pred_time = last_update + (i + 1) * self.base_dt
-                    if pred_time < current_time:
-                        self.gap_predictions[track.id].append({
-                            'timestamp': pred_time,
-                            'state': pred_state.copy(),
-                            'covariance': pred_cov.copy(),
-                            'is_gap_prediction': True
-                        })
-
-                # Use final prediction
-                track.state, track.covariance = predictions[-1]
+                pred_state, pred_cov = predictions[-1]
             else:
-                # Single prediction step
-                old_state = track.state.copy()
-                track.state, track.covariance = self.kf.predict(
+                pred_state, pred_cov = self.kf.predict(
                     track.state, track.covariance, track_time_gap
                 )
 
-                # Store single prediction
-                if track_time_gap > 0.1:  # Only store for significant gaps
-                    self.gap_predictions[track.id].append({
-                        'timestamp': current_time,
-                        'state': track.state.copy(),
-                        'covariance': track.covariance.copy(),
-                        'is_gap_prediction': True
-                    })
+            # Record prediction step
+            track.record_prediction_step(pred_state, pred_cov, current_time, track_time_gap)
 
             track.age += 1
             self.track_last_update_times[track.id] = current_time
@@ -480,6 +452,10 @@ class RadarTracker:
         if dt is None:
             dt = self.dt
 
+        # Use the already-computed prediction state.
+        pred_state = track.predicted_state
+        pred_covariance = track.predicted_covariance
+
         # If this is the second detection, compute velocity estimate
         if track.hits == 1 and track.last_detection is not None:
             x_prev, y_prev = track.last_detection.cartesian_pos
@@ -504,18 +480,20 @@ class RadarTracker:
             pred_state[2] = vx
             pred_state[3] = vy
 
-            # Run KF-update with modified state
-            track.state, track.covariance = self.kf.update(
-                pred_state, pred_covariance, detection.cartesian_pos
-            )
         else:
             # Normal predict→update cycle
             pred_state, pred_covariance = self.kf.predict(track.state, track.covariance, dt)
-            track.state, track.covariance = self.kf.update(
-                pred_state, pred_covariance, detection.cartesian_pos
-            )
 
-        # Update bookkeeping fields
+
+        # Perform update step
+        updated_state, updated_covariance, innovation = self.kf.update(
+            pred_state, pred_covariance, detection.cartesian_pos
+        )
+
+        # Record update step
+        track.record_update_step(updated_state, updated_covariance, detection, innovation)
+
+        # Update other track attributes
         track.last_detection = detection
         track.hits += 1
         track.time_since_update = 0
