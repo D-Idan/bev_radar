@@ -324,7 +324,8 @@ def offline_tracking(
             detections=detections,
             ground_truth=ground_truth,
             active_tracks=active_tracks,
-            output_dir=str(output_paths['frame_images'])
+            output_dir=str(output_paths['frame_images']),
+            radar_config=config
         )
 
     # 5) Build DataFrame and write tracking.csv
@@ -399,7 +400,8 @@ def offline_tracking(
         all_tracks=all_tracks,
         frame_times=frame_times,
         gap_threshold=gap_threshold,
-        output_dir=str(output_paths['summary_plots'])
+        output_dir=str(output_paths['summary_plots']),
+        radar_config=config
     )
 
     # Visualize timing analysis
