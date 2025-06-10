@@ -22,7 +22,8 @@ def visualize_frame_radar_azimuth(
         active_tracks: List[Track],
         output_dir: str,
         show_coverage_bounds: bool = True,
-        show_confidence_ellipses: bool = True
+        show_confidence_ellipses: bool = True,
+        radar_config: Optional[dict] = None,
 ):
     """
     Plot one frame in (azimuth_deg, range_m) space with radar coverage overlay and confidence ellipses.
@@ -32,17 +33,35 @@ def visualize_frame_radar_azimuth(
     plt.figure(figsize=(10, 8))
     ax = plt.gca()
 
+    # Extract radar parameters from config (with fallback defaults)
+    if radar_config is None:
+        radar_config = {}
+
+    max_range = radar_config.get('max_range', 103.0)
+    min_azimuth = radar_config.get('min_azimuth_deg', -90.0)
+    max_azimuth = radar_config.get('max_azimuth_deg', 90.0)
+    range_buffer = radar_config.get('range_buffer', 10.0)
+    azimuth_buffer = radar_config.get('azimuth_buffer_deg', 5.0)
+
     # Show radar coverage bounds
     if show_coverage_bounds:
-        # Draw coverage area
-        ax.axhline(y=103, color='gray', linestyle='--', alpha=0.5, label='Max Range')
-        ax.axvline(x=-90, color='gray', linestyle='--', alpha=0.5, label='Azimuth Limits')
-        ax.axvline(x=90, color='gray', linestyle='--', alpha=0.5)
+        # Draw coverage area using config values
+        ax.axhline(y=max_range, color='gray', linestyle='--', alpha=0.5, label='Max Range')
+        ax.axvline(x=min_azimuth, color='gray', linestyle='--', alpha=0.5, label='Azimuth Limits')
+        ax.axvline(x=max_azimuth, color='gray', linestyle='--', alpha=0.5)
+
+        # Calculate display bounds with buffer
+        display_max_range = max_range + range_buffer
+        display_min_azimuth = min_azimuth - azimuth_buffer
+        display_max_azimuth = max_azimuth + azimuth_buffer
 
         # Shade out-of-coverage areas
-        ax.fill_between([-90, 90], 103, 120, color='red', alpha=0.1, label='Out of Coverage')
-        ax.fill([-100, -90, -90, -100], [0, 0, 120, 120], color='red', alpha=0.1)
-        ax.fill([90, 100, 100, 90], [0, 0, 120, 120], color='red', alpha=0.1)
+        ax.fill_between([min_azimuth, max_azimuth], max_range, display_max_range,
+                        color='red', alpha=0.1, label='Out of Coverage')
+        ax.fill([display_min_azimuth, min_azimuth, min_azimuth, display_min_azimuth],
+                [0, 0, display_max_range, display_max_range], color='red', alpha=0.1)
+        ax.fill([max_azimuth, display_max_azimuth, display_max_azimuth, max_azimuth],
+                [0, 0, display_max_range, display_max_range], color='red', alpha=0.1)
 
     # Plot network output (blue circles)
     if detections:
@@ -107,8 +126,14 @@ def visualize_frame_radar_azimuth(
     ax.set_ylabel("Range (m)")
     ax.set_title(f"Frame {frame_id:06d} - Enhanced Radar Tracking Visualization")
     ax.legend(loc='upper right', fontsize=8)
-    ax.set_xlim(-100, 100)
-    ax.set_ylim(0, 120)
+
+    # Use config-based limits
+    display_min_azimuth = radar_config.get('min_azimuth_deg', -90.0) - radar_config.get('azimuth_buffer_deg', 5.0) - 5
+    display_max_azimuth = radar_config.get('max_azimuth_deg', 90.0) + radar_config.get('azimuth_buffer_deg', 5.0) + 5
+    display_max_range = radar_config.get('max_range', 103.0) + radar_config.get('range_buffer', 10.0) + 10
+
+    ax.set_xlim(display_min_azimuth, display_max_azimuth)
+    ax.set_ylim(0, display_max_range)
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -736,7 +761,8 @@ def visualize_timing_analysis(frame_times: List[Tuple[int, float]],
 def visualize_tracking_during_gaps(all_tracks: List[List[Track]],
                                    frame_times: List[Tuple[int, float]],
                                    gap_threshold: float,
-                                   output_dir: str):
+                                   output_dir: str,
+                                   radar_config: Optional[dict] = None):
     """Visualize tracking during gaps using stored prediction states."""
     prepare_output_directories(output_dir)
 
