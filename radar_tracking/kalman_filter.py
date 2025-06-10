@@ -6,6 +6,7 @@ Adapted for 2D position and velocity tracking.
 """
 import numpy as np
 from typing import Tuple, List
+from copy import deepcopy
 
 
 class RadarKalmanFilter:
@@ -76,7 +77,7 @@ class RadarKalmanFilter:
         """
         # Initialize state: [x, y, 0, 0] (zero initial velocity)
         state = np.array([measurement[0], measurement[1], 0.0, 0.0])
-        covariance = self.P_init.copy()
+        covariance = deepcopy(self.P_init)
 
         return state, covariance
 
@@ -128,7 +129,7 @@ class RadarKalmanFilter:
             # Use remaining time for last step if needed
             dt = min(step_dt, total_dt - i * step_dt)
             current_state, current_cov = self.predict(current_state, current_cov, dt)
-            predictions.append((current_state.copy(), current_cov.copy()))
+            predictions.append((deepcopy(current_state), deepcopy(current_cov)))
 
         return predictions
 
