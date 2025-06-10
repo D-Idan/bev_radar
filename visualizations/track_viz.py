@@ -21,14 +21,15 @@ def visualize_frame_radar_azimuth(
         ground_truth: List[Detection],
         active_tracks: List[Track],
         output_dir: str,
-        show_coverage_bounds: bool = True
+        show_coverage_bounds: bool = True,
+        show_confidence_ellipses: bool = True
 ):
     """
-    Plot one frame in (azimuth_deg, range_m) space with radar coverage overlay.
+    Plot one frame in (azimuth_deg, range_m) space with radar coverage overlay and confidence ellipses.
     """
     prepare_output_directories(output_dir)
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(10, 8))
     ax = plt.gca()
 
     # Show radar coverage bounds
@@ -61,21 +62,52 @@ def visualize_frame_radar_azimuth(
         rng_gt = [d.range_m for d in ground_truth]
         ax.scatter(az_gt, rng_gt, c='green', marker='x', s=60, label='Ground Truth')
 
-    # Plot tracks using Kalman state (red triangles)
-    for track in active_tracks:
+    # Plot tracks with confidence ellipses
+    for i, track in enumerate(active_tracks):
         range_m, azimuth_rad = track.kalman_polar_position
         az_tr = np.degrees(azimuth_rad)
         rng_tr = range_m
 
+        # Plot track position (update state)
         ax.scatter(az_tr, rng_tr, marker='^', s=20, facecolors='none', edgecolors='red',
-                   linewidths=0.8, label='Tracker Estimate' if track == active_tracks[0] else "")
+                   linewidths=0.8, label='Track Position' if i == 0 else "")
         ax.text(az_tr + 0.2, rng_tr + 0.2, f"T{track.id}", color='red', fontsize=8)
+
+        # Plot prediction state if available
+        if hasattr(track, 'predicted_state') and track.predicted_state is not None:
+            from radar_tracking.coordinate_transforms import cartesian_to_polar
+            pred_range, pred_azimuth = cartesian_to_polar(
+                track.predicted_state[0], track.predicted_state[1]
+            )
+            pred_az_deg = np.degrees(pred_azimuth)
+            ax.scatter(pred_az_deg, pred_range, marker='o', s=15,
+                       facecolors='orange', edgecolors='darkorange', alpha=0.7,
+                       label='Prediction' if i == 0 else "")
+
+        # Draw confidence ellipses if enabled and covariance data is available
+        if show_confidence_ellipses and hasattr(track, 'covariance'):
+            # Update state ellipse (solid)
+            update_ellipse = create_confidence_ellipse_polar(
+                track.position, track.covariance[:2, :2], color='red', alpha=0.2
+            )
+            if update_ellipse:
+                ax.add_patch(update_ellipse)
+
+            # Prediction state ellipse (dashed) if available
+            if hasattr(track, 'predicted_covariance') and track.predicted_covariance is not None:
+                pred_pos = (track.predicted_state[0], track.predicted_state[1])
+                pred_ellipse = create_confidence_ellipse_polar(
+                    pred_pos, track.predicted_covariance[:2, :2],
+                    color='orange', alpha=0.15, linestyle='--'
+                )
+                if pred_ellipse:
+                    ax.add_patch(pred_ellipse)
 
     ax.set_xlabel("Azimuth (deg)")
     ax.set_ylabel("Range (m)")
-    ax.set_title(f"Frame {frame_id:06d} - Radar Coverage Visualization")
+    ax.set_title(f"Frame {frame_id:06d} - Enhanced Radar Tracking Visualization")
     ax.legend(loc='upper right', fontsize=8)
-    ax.set_xlim(-100, 100)  # Show slightly beyond coverage for context
+    ax.set_xlim(-100, 100)
     ax.set_ylim(0, 120)
     ax.grid(True, alpha=0.3)
 
@@ -83,6 +115,42 @@ def visualize_frame_radar_azimuth(
     out_path = Path(output_dir) / f"frame_{frame_id:06d}.jpg"
     plt.savefig(out_path, dpi=150)
     plt.close()
+
+
+def create_confidence_ellipse_polar(position: Tuple[float, float],
+                                    covariance: np.ndarray,
+                                    color: str = 'red',
+                                    alpha: float = 0.3,
+                                    linestyle: str = '-') -> Optional['Ellipse']:
+    """Create confidence ellipse in polar coordinates for radar display."""
+    from matplotlib.patches import Ellipse
+    from radar_tracking.coordinate_transforms import cartesian_to_polar
+
+    try:
+        # Convert position to polar
+        range_m, azimuth_rad = cartesian_to_polar(position[0], position[1])
+        azimuth_deg = np.degrees(azimuth_rad)
+
+        # Eigenvalues and eigenvectors of covariance
+        eigenvals, eigenvecs = np.linalg.eigh(covariance)
+
+        # Convert eigenvalues to standard deviations (95% confidence)
+        chi2_val = 5.991  # 95% confidence
+        width = 2 * np.sqrt(chi2_val * eigenvals[0])
+        height = 2 * np.sqrt(chi2_val * eigenvals[1])
+
+        # Angle of ellipse
+        angle = np.degrees(np.arctan2(eigenvecs[1, 0], eigenvecs[0, 0]))
+
+        # Create ellipse in Cartesian space, then transform display coordinates
+        # For radar display, we approximate the ellipse in polar coordinates
+        ellipse = Ellipse((azimuth_deg, range_m),
+                          width=np.degrees(width / range_m), height=height,
+                          angle=angle, alpha=alpha, facecolor=color,
+                          edgecolor=color, linestyle=linestyle)
+        return ellipse
+    except:
+        return None
 
 
 def visualize_counts_vs_tracks_per_frame(
@@ -283,10 +351,10 @@ def visualize_all_frames_3d_overview(
         all_ground_truth: List[List[Detection]],
         all_tracks: List[List[Track]],
         all_frames: List[int],
-        frame_times: List[Tuple[int, float]],  # Added parameter
+        frame_times: List[Tuple[int, float]],
         output_dir: str
 ):
-    """Create 3D visualization with real time axis showing tracker predictions during gaps."""
+    """Create 3D visualization using actual stored prediction and update states."""
     prepare_output_directories(output_dir)
 
     import matplotlib.cm as cm
@@ -312,7 +380,7 @@ def visualize_all_frames_3d_overview(
     track_colors = {track_id: mcolors.to_hex(color_map(i % 10))
                     for i, track_id in enumerate(unique_track_ids)}
 
-    # Store track data with actual Kalman predictions
+    # Store track data with actual stored states
     track_data = {}
 
     for frame_idx, frame_id in enumerate(all_frames):
@@ -330,65 +398,38 @@ def visualize_all_frames_3d_overview(
             det_az.append(np.degrees(det.azimuth_rad))
             det_rng.append(det.range_m)
 
-        # Tracks with enhanced prediction handling
+        # Tracks with stored prediction/update states
         for track in all_tracks[frame_idx]:
+            if track.id not in track_data:
+                track_data[track.id] = {
+                    'update_states': [],  # After update (measurements)
+                    'prediction_states': [],  # After prediction (no measurement)
+                    'timestamps': []
+                }
+
+            # Use actual Kalman state (after update)
             range_m, azimuth_rad = track.kalman_polar_position
             azimuth_deg = np.degrees(azimuth_rad)
 
-            if track.id not in track_data:
-                track_data[track.id] = {
-                    'measurements': [],  # Actual measurements
-                    'predictions': [],  # Kalman predictions during gaps
-                    'has_detection': []
-                }
+            track_data[track.id]['update_states'].append((timestamp, azimuth_deg, range_m))
+            track_data[track.id]['timestamps'].append(timestamp)
 
-            track_data[track.id]['measurements'].append((timestamp, azimuth_deg, range_m))
-            track_data[track.id]['has_detection'].append(track.last_detection is not None)
+            # Add prediction state if available and different from update
+            if (hasattr(track, 'predicted_state') and track.predicted_state is not None and
+                    hasattr(track, 'state_history') and track.state_history):
 
-    # Generate Kalman predictions for gaps
-    for track_id, data in track_data.items():
-        measurements = data['measurements']
-        has_detections = data['has_detection']
-
-        # Find gaps and generate actual Kalman predictions
-        for i in range(len(measurements) - 1):
-            curr_time, curr_az, curr_rng = measurements[i]
-            next_time, next_az, next_rng = measurements[i + 1]
-
-            time_gap = next_time - curr_time
-            if time_gap > 0.2:  # Significant gap
-                # Create temporary track for prediction
-                from radar_tracking.data_structures import Track
-                from radar_tracking.coordinate_transforms import polar_to_cartesian
-
-                # Convert current position back to Cartesian for state
-                x_curr, y_curr = polar_to_cartesian(curr_rng, np.radians(curr_az))
-
-                # Estimate velocity from previous measurement if available
-                if i > 0:
-                    prev_time, prev_az, prev_rng = measurements[i - 1]
-                    prev_x, prev_y = polar_to_cartesian(prev_rng, np.radians(prev_az))
-                    dt_prev = curr_time - prev_time
-                    vx = (x_curr - prev_x) / dt_prev if dt_prev > 0 else 0
-                    vy = (y_curr - prev_y) / dt_prev if dt_prev > 0 else 0
-                else:
-                    vx, vy = 0, 0
-
-                # Create state vector and covariance
-                state = np.array([x_curr, y_curr, vx, vy])
-                covariance = np.eye(4) * 10.0  # Initial uncertainty
-
-                # Generate actual Kalman predictions
-                temp_track = type('TempTrack', (), {
-                    'state': state,
-                    'covariance': covariance
-                })()
-
-                predictions = get_actual_kalman_predictions(
-                    temp_track, curr_time, next_time, dt=0.05
-                )
-
-                data['predictions'].extend(predictions)
+                # Get latest prediction from state history
+                for entry in reversed(track.state_history):
+                    if entry['step_type'] == 'prediction':
+                        from radar_tracking.coordinate_transforms import cartesian_to_polar
+                        pred_range, pred_azimuth = cartesian_to_polar(
+                            entry['state'][0], entry['state'][1]
+                        )
+                        pred_azimuth_deg = np.degrees(pred_azimuth)
+                        track_data[track.id]['prediction_states'].append(
+                            (timestamp, pred_azimuth_deg, pred_range)
+                        )
+                        break
 
     # Plot ground truth and detections
     if gt_times:
@@ -398,26 +439,25 @@ def visualize_all_frames_3d_overview(
         ax.scatter(det_times, det_az, det_rng, c='blue', s=15,
                    alpha=0.5, label='Detections')
 
-    # Plot tracks with clear distinction between measurements and predictions
+    # Plot tracks with stored states
     for track_id, data in track_data.items():
-        if not data['measurements']:
+        if not data['update_states']:
             continue
 
         color = track_colors[track_id]
 
-        # Plot measurements (solid line with markers)
-        times, azimuths, ranges = zip(*data['measurements'])
+        # Plot update states (solid line with circles)
+        times, azimuths, ranges = zip(*data['update_states'])
         ax.plot(times, azimuths, ranges, color=color, linewidth=2.5, alpha=0.9,
-                label=f'Track {track_id} (Measurements)', marker='o', markersize=4)
+                label=f'Track {track_id} (Updates)', marker='o', markersize=4)
 
-        # Plot predictions (dashed line, different markers)
-        if data['predictions']:
-            pred_times, pred_ranges, pred_azimuths, _ = zip(*data['predictions'])
-            pred_azimuths_deg = [np.degrees(az) for az in pred_azimuths]
-            ax.plot(pred_times, pred_azimuths_deg, pred_ranges,
+        # Plot prediction states (dashed line with triangles)
+        if data['prediction_states']:
+            pred_times, pred_azimuths, pred_ranges = zip(*data['prediction_states'])
+            ax.plot(pred_times, pred_azimuths, pred_ranges,
                     color=color, linewidth=1.5, alpha=0.6, linestyle='--',
-                    marker='^', markersize=2,
-                    label=f'Track {track_id} (Kalman Predictions)')
+                    marker='^', markersize=3,
+                    label=f'Track {track_id} (Predictions)')
 
         # Add track ID at start
         if times:
@@ -427,8 +467,8 @@ def visualize_all_frames_3d_overview(
     ax.set_xlabel('Time (seconds)', fontsize=12)
     ax.set_ylabel('Azimuth (degrees)', fontsize=12)
     ax.set_zlabel('Range (meters)', fontsize=12)
-    ax.set_title('3D Radar Tracking: Measurements vs Kalman Predictions\n'
-                 'Solid lines: actual measurements, Dashed lines: Kalman filter predictions',
+    ax.set_title('3D Radar Tracking: Stored Prediction vs Update States\n'
+                 'Solid: update states, Dashed: prediction states',
                  fontsize=14)
 
     # Enhanced legend
@@ -439,7 +479,7 @@ def visualize_all_frames_3d_overview(
     ax.view_init(elev=20, azim=45)
 
     plt.tight_layout()
-    save_path = Path(output_dir) / "3d_tracking_enhanced.png"
+    save_path = Path(output_dir) / "3d_tracking_stored_states.png"
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     plt.close()
 
@@ -449,11 +489,11 @@ def visualize_tracking_temporal_evolution(
         all_ground_truth: List[List[Detection]],
         all_tracks: List[List[Track]],
         all_frames: List[int],
-        frame_times: List[Tuple[int, float]],  # Added parameter
+        frame_times: List[Tuple[int, float]],
         num_tracks: Optional[int] = 3,
         output_dir: str = "tracking_temporal_evolution.png",
 ):
-    """Create temporal visualization with real time axis showing predictions during gaps."""
+    """Create temporal visualization using stored prediction and update states."""
     prepare_output_directories(output_dir)
 
     frame_to_time = dict(frame_times)
@@ -482,60 +522,59 @@ def visualize_tracking_temporal_evolution(
 
         ax = axes[i]
 
-        # Extract data
-        timestamps = [t for t, _, _ in track_history]
-        ranges = [track.kalman_polar_position[0] for _, track, _ in track_history]
-        has_detection = [track.last_detection is not None for _, track, _ in track_history]
+        # Extract stored state data
+        timestamps = []
+        update_ranges = []
+        prediction_ranges = []
+        update_times = []
+        prediction_times = []
+        detection_ranges = []
+        detection_times = []
 
-        # Generate actual Kalman predictions for gaps
-        enhanced_times = []
-        enhanced_ranges = []
-        prediction_mask = []
+        for timestamp, track, frame_id in track_history:
+            # Update state (current position after measurement)
+            range_m, _ = track.kalman_polar_position
+            timestamps.append(timestamp)
+            update_ranges.append(range_m)
+            update_times.append(timestamp)
 
-        for j in range(len(timestamps) - 1):
-            enhanced_times.append(timestamps[j])
-            enhanced_ranges.append(ranges[j])
-            prediction_mask.append(False)  # Measurement
+            # Detection data if available
+            if track.last_detection:
+                detection_ranges.append(track.last_detection.range_m)
+                detection_times.append(timestamp)
 
-            # Check for significant time gap
-            time_gap = timestamps[j + 1] - timestamps[j]
-            if time_gap > 0.15:  # Generate predictions for gaps > 150ms
-                # Get current track state
-                _, current_track, _ = track_history[j]
+            # Prediction state from stored history if available
+            if (hasattr(track, 'state_history') and track.state_history):
+                for entry in reversed(track.state_history):
+                    if entry['step_type'] == 'prediction' and entry.get('timestamp'):
+                        from radar_tracking.coordinate_transforms import cartesian_to_polar
+                        pred_range, _ = cartesian_to_polar(
+                            entry['state'][0], entry['state'][1]
+                        )
+                        prediction_ranges.append(pred_range)
+                        prediction_times.append(entry['timestamp'])
+                        break
 
-                # Generate actual Kalman predictions
-                predictions = get_actual_kalman_predictions(
-                    current_track, timestamps[j], timestamps[j + 1], dt=0.05
-                )
+        # Plot update states (solid line with circles)
+        if update_times and update_ranges:
+            ax.plot(update_times, update_ranges, color=colors[i % len(colors)],
+                    linewidth=3, alpha=0.9, label=f'Track {track_id} (Kalman Updates)',
+                    marker='o', markersize=5, markerfacecolor='white',
+                    markeredgewidth=2, zorder=3)
 
-                for pred_time, pred_range, _, is_pred in predictions:
-                    if pred_time < timestamps[j + 1]:  # Don't overlap with next measurement
-                        enhanced_times.append(pred_time)
-                        enhanced_ranges.append(pred_range)
-                        prediction_mask.append(True)  # Prediction
-
-        # Add last point
-        enhanced_times.append(timestamps[-1])
-        enhanced_ranges.append(ranges[-1])
-        prediction_mask.append(False)  # Measurement
-
-        # Plot measurements vs predictions with clear distinction
-        meas_times = [t for t, is_pred in zip(enhanced_times, prediction_mask) if not is_pred]
-        meas_ranges = [r for r, is_pred in zip(enhanced_ranges, prediction_mask) if not is_pred]
-        pred_times = [t for t, is_pred in zip(enhanced_times, prediction_mask) if is_pred]
-        pred_ranges = [r for r, is_pred in zip(enhanced_ranges, prediction_mask) if is_pred]
-
-        # Plot measurements (solid line with circles)
-        ax.plot(meas_times, meas_ranges, color=colors[i % len(colors)],
-                linewidth=3, alpha=0.9, label=f'Track {track_id} (Measurements)',
-                marker='o', markersize=5, markerfacecolor='white', markeredgewidth=2)
-
-        # Plot Kalman predictions (dashed line with triangles)
-        if pred_times:
-            ax.plot(pred_times, pred_ranges, color=colors[i % len(colors)],
+        # Plot prediction states (dashed line with triangles)
+        if prediction_times and prediction_ranges:
+            ax.plot(prediction_times, prediction_ranges, color=colors[i % len(colors)],
                     linewidth=2, alpha=0.6, linestyle='--',
                     label=f'Track {track_id} (Kalman Predictions)',
-                    marker='^', markersize=3)
+                    marker='^', markersize=4, zorder=2)
+
+        # Plot raw detections (scatter)
+        if detection_times and detection_ranges:
+            ax.scatter(detection_times, detection_ranges,
+                       color=colors[i % len(colors)], alpha=0.7, s=30,
+                       marker='s', edgecolors='black', linewidth=0.5,
+                       label=f'Track {track_id} (Raw Detections)', zorder=4)
 
         # Mark significant time gaps
         for j in range(len(timestamps) - 1):
@@ -551,21 +590,39 @@ def visualize_tracking_temporal_evolution(
 
         # Styling and annotations
         ax.set_ylabel('Range (m)', fontsize=12)
-        ax.set_title(f'Track {track_id}: Measurements vs Kalman Predictions During Gaps',
+        ax.set_title(f'Track {track_id}: Stored Kalman States Analysis',
                      fontsize=13, fontweight='bold')
         ax.legend(loc='upper right', fontsize=10)
         ax.grid(True, alpha=0.3)
 
         # Set appropriate axis limits
-        if enhanced_times:
-            ax.set_xlim(min(enhanced_times) - 0.5, max(enhanced_times) + 0.5)
+        if timestamps:
+            ax.set_xlim(min(timestamps) - 0.5, max(timestamps) + 0.5)
+
+        # Add uncertainty analysis if available
+        if hasattr(track_history[0][1], 'state_history'):
+            uncertainties = []
+            uncertainty_times = []
+            for timestamp, track, _ in track_history:
+                if hasattr(track, 'covariance'):
+                    pos_uncertainty = np.sqrt(track.covariance[0, 0] + track.covariance[1, 1])
+                    uncertainties.append(pos_uncertainty)
+                    uncertainty_times.append(timestamp)
+
+            if uncertainties:
+                # Add uncertainty as shaded area
+                ax2 = ax.twinx()
+                ax2.plot(uncertainty_times, uncertainties, 'gray', alpha=0.5,
+                         linewidth=1, label='Position Uncertainty')
+                ax2.set_ylabel('Uncertainty (m)', fontsize=10, color='gray')
+                ax2.tick_params(axis='y', labelcolor='gray')
 
         # Add track statistics
-        num_measurements = len(meas_times)
-        num_predictions = len(pred_times)
+        num_updates = len(update_times)
+        num_predictions = len(prediction_times)
         track_duration = timestamps[-1] - timestamps[0] if len(timestamps) > 1 else 0
 
-        stats_text = (f'Measurements: {num_measurements}\n'
+        stats_text = (f'Updates: {num_updates}\n'
                       f'Predictions: {num_predictions}\n'
                       f'Duration: {track_duration:.1f}s')
 
@@ -574,147 +631,17 @@ def visualize_tracking_temporal_evolution(
                 fontsize=9, verticalalignment='top')
 
     # Set x-label on bottom subplot
-    if axes:
+    if axes.any():
         axes[-1].set_xlabel('Time (seconds)', fontsize=12)
 
-    plt.suptitle('Enhanced Temporal Evolution: Actual Kalman Filter Predictions\n'
-                 'Solid lines: measurements, Dashed lines: Kalman filter predictions',
+    plt.suptitle('Temporal Evolution: Stored Kalman Filter States\n'
+                 'Actual prediction and update states from tracking system',
                  fontsize=16, fontweight='bold', y=0.98)
 
     plt.tight_layout()
-    plt.subplots_adjust(top=0.93)  # Make room for suptitle
+    plt.subplots_adjust(top=0.93)
 
-    save_path = Path(output_dir) / "enhanced_tracking_temporal_evolution.png"
-    plt.savefig(save_path, dpi=200, bbox_inches='tight')
-    plt.close()
-
-
-def visualize_tracking_temporal_evolution(
-        all_detections: List[List[Detection]],
-        all_ground_truth: List[List[Detection]],
-        all_tracks: List[List[Track]],
-        all_frames: List[int],
-        frame_times: List[Tuple[int, float]],  # Added parameter
-        num_tracks: Optional[int] = 3,
-        output_dir: str = "tracking_temporal_evolution.png",
-):
-    """Create temporal visualization with real time axis showing predictions during gaps."""
-    prepare_output_directories(output_dir)
-
-    # Create frame_id to timestamp mapping
-    frame_to_time = dict(frame_times)
-
-    # Find longest-lived tracks
-    track_lifespans = {}
-    for frame_idx, tracks in enumerate(all_tracks):
-        timestamp = frame_to_time.get(all_frames[frame_idx], all_frames[frame_idx])
-        for track in tracks:
-            if track.id not in track_lifespans:
-                track_lifespans[track.id] = []
-            track_lifespans[track.id].append((timestamp, track, all_frames[frame_idx]))
-
-    # Select top num_tracks longest tracks
-    longest_tracks = sorted(track_lifespans.items(), key=lambda x: len(x[1]), reverse=True)[:num_tracks]
-
-    fig, axes = plt.subplots(num_tracks, 1, figsize=(14, 3.5 * num_tracks))
-    if num_tracks == 1:
-        axes = [axes]
-
-    colors = ['red', 'blue', 'green', 'orange', 'purple']
-
-    for i, (track_id, track_history) in enumerate(longest_tracks):
-        if i >= len(axes):
-            break
-
-        ax = axes[i]
-
-        # Extract data
-        timestamps = [t for t, _, _ in track_history]
-        ranges = [track.kalman_polar_position[0] for _, track, _ in track_history]
-        has_detection = [track.last_detection is not None for _, track, _ in track_history]
-
-        # Create dense time series for predictions
-        dense_times = []
-        dense_ranges = []
-        prediction_mask = []
-
-        for j in range(len(timestamps) - 1):
-            dense_times.append(timestamps[j])
-            dense_ranges.append(ranges[j])
-            prediction_mask.append(True)  # Actual measurement
-
-            # Fill gaps with predictions
-            time_gap = timestamps[j + 1] - timestamps[j]
-            if time_gap > 0.15:  # Show predictions for gaps > 150ms
-                num_pred = int(time_gap / 0.05)  # Prediction every 50ms
-                for k in range(1, num_pred):
-                    t = timestamps[j] + k * 0.05
-                    # Linear interpolation for smooth visualization
-                    alpha = k / num_pred
-                    r = ranges[j] + alpha * (ranges[j + 1] - ranges[j])
-                    dense_times.append(t)
-                    dense_ranges.append(r)
-                    prediction_mask.append(False)  # Prediction
-
-        # Add last point
-        dense_times.append(timestamps[-1])
-        dense_ranges.append(ranges[-1])
-        prediction_mask.append(True)
-
-        # Plot Kalman filtered trajectory
-        ax.plot(dense_times, dense_ranges, color=colors[i % len(colors)],
-                linewidth=2.5, label=f'Track {track_id} (Kalman Filtered)', zorder=2)
-
-        # Highlight predictions with different style
-        pred_times = [t for t, is_meas in zip(dense_times, prediction_mask) if not is_meas]
-        pred_ranges = [r for r, is_meas in zip(dense_ranges, prediction_mask) if not is_meas]
-        if pred_times:
-            ax.plot(pred_times, pred_ranges, 'o', color=colors[i % len(colors)],
-                    markersize=3, alpha=0.3, label='Predictions during gaps')
-
-        # Plot raw detections
-        detection_times = []
-        detection_ranges = []
-        for timestamp, track, _ in track_history:
-            if track.last_detection:
-                detection_times.append(timestamp)
-                detection_ranges.append(track.last_detection.range_m)
-
-        if detection_times:
-            ax.scatter(detection_times, detection_ranges,
-                       color=colors[i % len(colors)], alpha=0.6, s=40,
-                       marker='o', edgecolors='black', linewidth=0.5,
-                       label='Raw Detections', zorder=3)
-
-        # Mark time gaps
-        for j in range(len(timestamps) - 1):
-            gap = timestamps[j + 1] - timestamps[j]
-            if gap > 0.5:  # Mark gaps > 500ms
-                ax.axvspan(timestamps[j], timestamps[j + 1], alpha=0.1,
-                           color='red', label='Time gap' if j == 0 else "")
-                # Add text annotation
-                mid_time = (timestamps[j] + timestamps[j + 1]) / 2
-                ax.text(mid_time, ax.get_ylim()[1] * 0.95, f'{gap:.1f}s gap',
-                        ha='center', va='top', fontsize=9,
-                        bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
-
-        ax.set_ylabel('Range (m)', fontsize=11)
-        ax.set_title(f'Track {track_id}: Continuous Tracking Through Time Gaps', fontsize=12)
-        ax.legend(loc='upper right', fontsize=9)
-        ax.grid(True, alpha=0.3)
-
-        # Set x-axis to show actual time
-        ax.set_xlim(min(dense_times) - 0.5, max(dense_times) + 0.5)
-
-    if len(axes) > 0:
-        axes[-1].set_xlabel('Time (seconds)', fontsize=11)
-
-    plt.suptitle('Temporal Evolution: Real-Time Tracking with Predictions\n'
-                 'Tracker maintains position estimates during measurement gaps',
-                 fontsize=14, fontweight='bold')
-    plt.tight_layout()
-
-    save_path = Path(output_dir) / "tracking_temporal_evolution.png"
+    save_path = Path(output_dir) / "temporal_evolution_stored_states.png"
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     plt.close()
 
@@ -805,11 +732,12 @@ def visualize_timing_analysis(frame_times: List[Tuple[int, float]],
         print(f"  - Average gap: {np.mean(corrected_gaps):.3f}s")
         print(f"  - Large gaps (>0.5s): {sum(1 for g in corrected_gaps if g > 0.5)}")
 
+
 def visualize_tracking_during_gaps(all_tracks: List[List[Track]],
                                    frame_times: List[Tuple[int, float]],
                                    gap_threshold: float,
                                    output_dir: str):
-    """Visualize how tracking maintains estimates during time gaps."""
+    """Visualize tracking during gaps using stored prediction states."""
     prepare_output_directories(output_dir)
 
     # Find frames with large preceding gaps
@@ -832,273 +760,185 @@ def visualize_tracking_during_gaps(all_tracks: List[List[Track]],
     # Visualize tracking through largest gap
     largest_gap = max(gap_frames, key=lambda x: x['gap'])
 
-    # Create larger figure for better clarity
-    fig = plt.figure(figsize=(16, 8))
-
-    # Use GridSpec for better layout control
+    fig = plt.figure(figsize=(16, 10))
     from matplotlib.gridspec import GridSpec
     gs = GridSpec(2, 2, figure=fig, width_ratios=[3, 1], height_ratios=[1, 1])
 
     ax1 = fig.add_subplot(gs[:, 0])  # Left: main tracking plot
     ax2 = fig.add_subplot(gs[0, 1])  # Top right: uncertainty
-    ax3 = fig.add_subplot(gs[1, 1])  # Bottom right: legend/info
+    ax3 = fig.add_subplot(gs[1, 1])  # Bottom right: info
 
     # Get gap information
     before_idx = largest_gap['before_idx']
     after_idx = largest_gap['after_idx']
-    before_frame_id = largest_gap['before'][0]
-    after_frame_id = largest_gap['after'][0]
+    gap_duration = largest_gap['gap']
     before_time = largest_gap['before'][1]
     after_time = largest_gap['after'][1]
-    gap_duration = largest_gap['gap']
 
     # Get tracks
     before_tracks = all_tracks[before_idx] if before_idx < len(all_tracks) else []
     after_tracks = all_tracks[after_idx] if after_idx < len(all_tracks) else []
 
-    # Main tracking visualization
-    track_data = []
+    # Analyze tracks using stored states
+    track_analysis = []
 
     for track in before_tracks:
         if track is None or not hasattr(track, 'state'):
             continue
 
-        x, y = track.position
-        vx, vy = track.velocity
+        # Get stored prediction and update states
+        prediction_state = None
+        update_state = track.state.copy()
+        uncertainty_before = None
+        uncertainty_after = None
+
+        # Extract prediction state if available
+        if (hasattr(track, 'predicted_state') and track.predicted_state is not None):
+            prediction_state = track.predicted_state.copy()
+
+        # Get uncertainty from covariance
+        if hasattr(track, 'covariance'):
+            uncertainty_before = np.sqrt(track.covariance[0, 0] + track.covariance[1, 1])
+        if (hasattr(track, 'predicted_covariance') and track.predicted_covariance is not None):
+            pred_uncertainty = np.sqrt(track.predicted_covariance[0, 0] + track.predicted_covariance[1, 1])
 
         # Find matching track after gap
         after_track = None
         for at in after_tracks:
             if at is not None and at.id == track.id:
                 after_track = at
+                if hasattr(at, 'covariance'):
+                    uncertainty_after = np.sqrt(at.covariance[0, 0] + at.covariance[1, 1])
                 break
 
-        track_data.append({
+        track_analysis.append({
             'id': track.id,
-            'before_pos': (x, y),
-            'velocity': (vx, vy),
+            'before_pos': track.position,
+            'velocity': track.velocity,
+            'prediction_pos': (prediction_state[0], prediction_state[1]) if prediction_state is not None else None,
             'after_pos': after_track.position if after_track else None,
-            'after_track': after_track
+            'uncertainty_before': uncertainty_before,
+            'uncertainty_after': uncertainty_after,
+            'has_prediction': prediction_state is not None,
+            'survived_gap': after_track is not None
         })
 
-    # Plot with enhanced clarity
-    if track_data:
-        # Create time points for smooth prediction curves
-        t_pred = np.linspace(0, gap_duration, 100)
+    # Plot tracking analysis
+    colors = plt.cm.Set1(np.arange(len(track_analysis)))
 
-        for i, td in enumerate(track_data):
-            color = plt.cm.Set1(i % 9)
+    for i, analysis in enumerate(track_analysis):
+        color = colors[i % len(colors)]
 
-            x0, y0 = td['before_pos']
-            vx, vy = td['velocity']
+        # Plot before position
+        x0, y0 = analysis['before_pos']
+        ax1.scatter(x0, y0, color=color, s=150, marker='o',
+                    edgecolors='black', linewidth=2, zorder=5,
+                    label=f"Track {analysis['id']} - Before")
 
-            # Starting position
-            ax1.scatter(x0, y0, color=color, s=200, marker='o',
+        # Plot prediction if available
+        if analysis['prediction_pos']:
+            px, py = analysis['prediction_pos']
+            ax1.scatter(px, py, color=color, s=100, marker='d',
+                        edgecolors='black', linewidth=1, alpha=0.7, zorder=4,
+                        label=f"Track {analysis['id']} - Prediction")
+
+            # Arrow from update to prediction
+            ax1.annotate('', xy=(px, py), xytext=(x0, y0),
+                         arrowprops=dict(arrowstyle='->', color=color,
+                                         lw=2, alpha=0.6, linestyle='--'))
+
+        # Plot after position if track survived
+        if analysis['after_pos']:
+            x1, y1 = analysis['after_pos']
+            ax1.scatter(x1, y1, color=color, s=150, marker='s',
                         edgecolors='black', linewidth=2, zorder=5,
-                        label=f"Track {td['id']} - Start")
+                        label=f"Track {analysis['id']} - After")
 
-            # Predicted trajectory
-            x_pred = x0 + vx * t_pred
-            y_pred = y0 + vy * t_pred
-            ax1.plot(x_pred, y_pred, '--', color=color, linewidth=3,
-                     alpha=0.7, label=f"Track {td['id']} - Prediction")
-
-            # Add arrows to show direction
-            for t in [gap_duration * 0.25, gap_duration * 0.5, gap_duration * 0.75]:
-                x_arr = x0 + vx * t
-                y_arr = y0 + vy * t
-                ax1.annotate('', xy=(x_arr + vx * 0.5, y_arr + vy * 0.5),
-                             xytext=(x_arr, y_arr),
-                             arrowprops=dict(arrowstyle='->', color=color,
-                                             lw=2, alpha=0.5))
-
-            # End position and correction
-            if td['after_pos']:
-                x1, y1 = td['after_pos']
-                ax1.scatter(x1, y1, color=color, s=200, marker='s',
-                            edgecolors='black', linewidth=2, zorder=5,
-                            label=f"Track {td['id']} - End")
-
-                # Correction arrow
-                x_pred_end = x0 + vx * gap_duration
-                y_pred_end = y0 + vy * gap_duration
-                ax1.annotate('', xy=(x1, y1), xytext=(x_pred_end, y_pred_end),
+            # Calculate and show tracking accuracy
+            if analysis['prediction_pos']:
+                px, py = analysis['prediction_pos']
+                error = np.sqrt((x1 - px) ** 2 + (y1 - py) ** 2)
+                # Correction arrow from prediction to actual
+                ax1.annotate('', xy=(x1, y1), xytext=(px, py),
                              arrowprops=dict(arrowstyle='->', color='red',
-                                             lw=3, alpha=0.8))
-
-                # Error distance
-                error = np.sqrt((x1 - x_pred_end) ** 2 + (y1 - y_pred_end) ** 2)
-                mid_x = (x_pred_end + x1) / 2
-                mid_y = (y_pred_end + y1) / 2
-                ax1.text(mid_x, mid_y, f'{error:.1f}m',
-                         bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
-                         fontsize=10, ha='center')
+                                             lw=2, alpha=0.8))
+                # Error annotation
+                mid_x, mid_y = (px + x1) / 2, (py + y1) / 2
+                ax1.text(mid_x, mid_y, f'{error:.1f}m error',
+                         bbox=dict(boxstyle='round', facecolor='white', alpha=0.9),
+                         fontsize=9, ha='center')
             else:
-                # Lost track
-                x_end = x0 + vx * gap_duration
-                y_end = y0 + vy * gap_duration
-                ax1.scatter(x_end, y_end, color=color, s=200, marker='x',
-                            linewidth=3, label=f"Track {td['id']} - Lost")
+                # Direct connection if no prediction stored
+                ax1.plot([x0, x1], [y0, y1], color=color, linewidth=2,
+                         alpha=0.7, linestyle=':')
 
-    else:
-        ax1.text(0.5, 0.5, 'No active tracks found',
-                 transform=ax1.transAxes, ha='center', va='center',
-                 fontsize=16, bbox=dict(boxstyle='round', facecolor='yellow'))
+        # Plot uncertainty ellipses if available
+        if analysis['uncertainty_before']:
+            from matplotlib.patches import Circle
+            circle = Circle((x0, y0), analysis['uncertainty_before'],
+                            color=color, alpha=0.2, fill=True)
+            ax1.add_patch(circle)
 
     # Configure main plot
     ax1.set_xlabel('X Position (m)', fontsize=14)
     ax1.set_ylabel('Y Position (m)', fontsize=14)
-    ax1.set_title(f'Track Prediction During {gap_duration:.2f}s Time Gap\n'
-                  f'Time: {before_time:.2f}s → {after_time:.2f}s '
-                  f'(Frames {before_frame_id} → {after_frame_id})',
+    ax1.set_title(f'Stored State Analysis During {gap_duration:.2f}s Gap\n'
+                  f'Using Actual Kalman Filter States',
                   fontsize=16, fontweight='bold')
-    ax1.grid(True, alpha=0.3, linestyle='--')
+    ax1.grid(True, alpha=0.3)
     ax1.axis('equal')
 
-    # Add scale reference
-    if track_data:
-        xlim = ax1.get_xlim()
-        ylim = ax1.get_ylim()
-        scale_length = 10  # 10 meters
-        scale_x = xlim[0] + (xlim[1] - xlim[0]) * 0.1
-        scale_y = ylim[0] + (ylim[1] - ylim[0]) * 0.1
-        ax1.plot([scale_x, scale_x + scale_length], [scale_y, scale_y],
-                 'k-', linewidth=3)
-        ax1.text(scale_x + scale_length / 2, scale_y - 1, '10m',
-                 ha='center', va='top', fontsize=10)
+    # Uncertainty evolution plot
+    if any(t['uncertainty_before'] for t in track_analysis):
+        track_ids = [t['id'] for t in track_analysis if t['uncertainty_before']]
+        before_uncertainties = [t['uncertainty_before'] for t in track_analysis if t['uncertainty_before']]
+        after_uncertainties = [t['uncertainty_after'] if t['uncertainty_after'] else t['uncertainty_before'] * 2
+                               for t in track_analysis if t['uncertainty_before']]
 
-    # Uncertainty plot
-    if before_tracks:
-        initial_variance = 2.0
-        if hasattr(before_tracks[0], 'covariance'):
-            initial_variance = (before_tracks[0].covariance[0, 0] +
-                                before_tracks[0].covariance[1, 1]) / 2
-
-        time_points = np.linspace(0, gap_duration, 50)
-        process_noise = 10.0
-        variance_growth = initial_variance + process_noise * time_points
-
-        ax2.plot(time_points, np.sqrt(variance_growth), 'r-', linewidth=3)
-        ax2.fill_between(time_points, 0, np.sqrt(variance_growth),
-                         alpha=0.2, color='red')
-        ax2.set_xlabel('Time (s)', fontsize=12)
+        x_pos = np.arange(len(track_ids))
+        ax2.bar(x_pos - 0.2, before_uncertainties, 0.4, label='Before Gap', alpha=0.7)
+        ax2.bar(x_pos + 0.2, after_uncertainties, 0.4, label='After Gap', alpha=0.7)
+        ax2.set_xticks(x_pos)
+        ax2.set_xticklabels([f'T{tid}' for tid in track_ids])
         ax2.set_ylabel('Position σ (m)', fontsize=12)
         ax2.set_title('Uncertainty Growth', fontsize=14)
+        ax2.legend()
         ax2.grid(True, alpha=0.3)
 
     # Information panel
     ax3.axis('off')
-    info_text = f"Gap Analysis:\n"
-    info_text += f"• Gap Duration: {gap_duration:.2f} seconds\n"
-    info_text += f"• Tracks Before Gap: {len(before_tracks)}\n"
-    info_text += f"• Tracks After Gap: {len(after_tracks)}\n"
-    info_text += f"• Tracks Maintained: {len([td for td in track_data if td['after_pos']])}\n"
 
-    if track_data:
-        avg_error = np.mean(
-            [np.sqrt((td['after_pos'][0] - (td['before_pos'][0] + td['velocity'][0] * gap_duration)) ** 2 +
-                     (td['after_pos'][1] - (td['before_pos'][1] + td['velocity'][1] * gap_duration)) ** 2)
-             for td in track_data if td['after_pos']])
-        info_text += f"• Avg Prediction Error: {avg_error:.2f} meters"
+    # Calculate statistics
+    num_tracks_before = len(track_analysis)
+    num_survived = sum(1 for t in track_analysis if t['survived_gap'])
+    num_with_predictions = sum(1 for t in track_analysis if t['has_prediction'])
+
+    if track_analysis and any(t['after_pos'] and t['prediction_pos'] for t in track_analysis):
+        errors = [np.sqrt((t['after_pos'][0] - t['prediction_pos'][0]) ** 2 +
+                          (t['after_pos'][1] - t['prediction_pos'][1]) ** 2)
+                  for t in track_analysis
+                  if t['after_pos'] and t['prediction_pos']]
+        avg_error = np.mean(errors) if errors else 0
+    else:
+        avg_error = 0
+
+    info_text = f"Stored State Analysis:\n"
+    info_text += f"• Gap Duration: {gap_duration:.2f}s\n"
+    info_text += f"• Tracks Before: {num_tracks_before}\n"
+    info_text += f"• Tracks Survived: {num_survived}\n"
+    info_text += f"• With Stored Predictions: {num_with_predictions}\n"
+    info_text += f"• Avg Prediction Error: {avg_error:.2f}m\n"
+    info_text += f"• Survival Rate: {100 * num_survived / max(num_tracks_before, 1):.1f}%"
 
     ax3.text(0.1, 0.8, info_text, transform=ax3.transAxes,
              fontsize=12, verticalalignment='top',
-             bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
+             bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.7))
 
     plt.tight_layout()
-    plt.savefig(Path(output_dir) / 'tracking_through_gaps.png', dpi=150)
+    plt.savefig(Path(output_dir) / 'stored_states_gap_analysis.png', dpi=150)
     plt.close()
 
-    # Create summary of all gaps (enhanced version)
-    if len(gap_frames) > 1:
-        fig2, (ax4, ax5) = plt.subplots(2, 1, figsize=(12, 8),
-                                        gridspec_kw={'height_ratios': [2, 1]})
-
-        gaps = [g['gap'] for g in gap_frames]
-        frame_ids = [g['before'][0] for g in gap_frames]
-        times = [g['before'][1] for g in gap_frames]
-
-        # Bar chart of gaps
-        bars = ax4.bar(range(len(gaps)), gaps, color='blue', alpha=0.7, edgecolor='black')
-
-        # Color code by severity
-        for i, (bar, gap) in enumerate(zip(bars, gaps)):
-            if gap > 2.0:
-                bar.set_color('red')
-                bar.set_alpha(0.8)
-            elif gap > 1.0:
-                bar.set_color('orange')
-                bar.set_alpha(0.7)
-
-        ax4.set_xlabel('Gap Index', fontsize=12)
-        ax4.set_ylabel('Gap Duration (seconds)', fontsize=12)
-        ax4.set_title(f'All Time Gaps > {gap_threshold}s in Tracking Sequence', fontsize=14)
-
-        # Add annotations
-        for i, (gap, fid, t) in enumerate(zip(gaps, frame_ids, times)):
-            ax4.text(i, gap + 0.05, f'Frame {fid}\n@ {t:.1f}s',
-                     ha='center', va='bottom', fontsize=9)
-
-        ax4.grid(True, alpha=0.3, axis='y')
-
-        # Timeline view
-        ax5.scatter(times, [1] * len(times), s=100, c=gaps, cmap='hot_r',
-                    edgecolors='black', linewidth=1)
-        ax5.set_xlabel('Time (seconds)', fontsize=12)
-        ax5.set_ylabel('')
-        ax5.set_title('Gap Locations in Timeline', fontsize=12)
-        ax5.set_ylim(0.5, 1.5)
-        ax5.set_yticks([])
-        ax5.grid(True, alpha=0.3, axis='x')
-
-        # Add colorbar
-        sm = plt.cm.ScalarMappable(cmap='hot_r',
-                                   norm=plt.Normalize(vmin=min(gaps), vmax=max(gaps)))
-        sm.set_array([])
-        cbar = plt.colorbar(sm, ax=ax5, orientation='horizontal', pad=0.1)
-        cbar.set_label('Gap Duration (s)', fontsize=11)
-
-        plt.tight_layout()
-        plt.savefig(Path(output_dir) / 'all_time_gaps.png', dpi=150)
-        plt.close()
-
-
-def get_actual_kalman_predictions(track, start_time, end_time, dt=0.05):
-    """
-    Generate actual Kalman filter predictions between two timestamps.
-
-    Args:
-        track: Track object with current state
-        start_time: Start timestamp
-        end_time: End timestamp
-        dt: Prediction time step
-
-    Returns:
-        List of (timestamp, range, azimuth, is_prediction) tuples
-    """
-    from radar_tracking.kalman_filter import RadarKalmanFilter
-    from radar_tracking.coordinate_transforms import cartesian_to_polar
-
-    predictions = []
-    kf = RadarKalmanFilter()
-
-    # Start from track's current state
-    current_state = track.state.copy()
-    current_covariance = track.covariance.copy()
-
-    # Generate predictions at regular intervals
-    current_time = start_time
-    while current_time < end_time:
-        # Predict next state
-        current_state, current_covariance = kf.predict(
-            current_state, current_covariance, dt
-        )
-        current_time += dt
-
-        # Convert to polar coordinates
-        x, y = current_state[0], current_state[1]
-        range_m, azimuth_rad = cartesian_to_polar(x, y)
-
-        predictions.append((current_time, range_m, azimuth_rad, True))  # True = prediction
-
-    return predictions
+    print(f"Gap analysis completed using stored Kalman states")
+    print(f"  - Analyzed {num_tracks_before} tracks through {gap_duration:.2f}s gap")
+    print(f"  - {num_with_predictions} tracks had stored prediction states")
+    print(f"  - {num_survived} tracks survived the gap")
