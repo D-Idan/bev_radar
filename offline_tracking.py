@@ -20,7 +20,6 @@ from visualizations.tracking_visualization import create_tracking_video
 from visualizations.visualize_timing import plot_timing_analysis, plot_detailed_timing_analysis
 from utils.tracking_metrics import TrackingEvaluator
 
-
 def setup_tracking_system():
     """
     Initialize and return a TrackletManager and its config dict.
@@ -328,6 +327,13 @@ def offline_tracking(
             output_dir=str(output_paths['frame_images'])
         )
 
+        # NEW: Plot confidence ellipses for this frame
+        plot_confidence_ellipses(
+            tracks=active_tracks,
+            frame_id=frame_id,
+            output_dir=str(output_paths['frame_images'])
+        )
+
     # 5) Build DataFrame and write tracking.csv
     track_df = pd.DataFrame(tracking_rows)
     cols = [
@@ -536,9 +542,9 @@ if __name__ == "__main__":
     custom_tracker_config = {
         'max_age': 3,
         'min_hits': 3,
-        'iou_threshold': 6.0,
-        'base_dt': 0.2,  # 100ms base time step
-        'max_dt_gap': 0.5,  # Trigger multi-step prediction for gaps > 0.5s
+        'iou_threshold': 10.0,
+        'base_dt': 0.2,  # 200ms base time step
+        'max_dt_gap': 1.0,  # Trigger multi-step prediction for gaps > 1.0s
 
         # Confidence-based parameters
         'min_confidence_init': 0.7,

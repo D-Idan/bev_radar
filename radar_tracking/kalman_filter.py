@@ -166,7 +166,7 @@ class RadarKalmanFilter:
         I_KH = np.eye(self.dim_x) - kalman_gain @ self.H
         covariance_updated = I_KH @ covariance
 
-        return state_updated, covariance_updated
+        return state_updated, covariance_updated, innovation
 
     def gating_distance(self,
                         state: np.ndarray,
