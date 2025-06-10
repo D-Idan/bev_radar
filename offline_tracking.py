@@ -379,8 +379,6 @@ def offline_tracking(
 
     # e) Temporal evolution visualization
     visualize_tracking_temporal_evolution(
-        all_detections=all_detections,
-        all_ground_truth=all_ground_truth,
         all_tracks=all_tracks,
         all_frames=all_frames,
         frame_times=frame_times,

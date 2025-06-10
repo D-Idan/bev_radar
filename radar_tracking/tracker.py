@@ -10,6 +10,7 @@ from radar_tracking.metrics import RadarMetrics
 from radar_tracking.coordinate_transforms import euclidean_distance, cartesian_to_polar
 from scipy.optimize import linear_sum_assignment
 from enum import Enum
+from copy import deepcopy
 
 
 class AssociationStrategy(Enum):
@@ -201,14 +202,23 @@ class RadarTracker:
                 predictions = self.kf.multi_step_predict(
                     track.state, track.covariance, track_time_gap, self.base_dt
                 )
+                
+                # Record all intermediate prediction steps
+                num_steps = len(predictions)
+                step_dt = track_time_gap / num_steps
+                for i, (pred_state, pred_cov) in enumerate(predictions):
+                    # Calculate timestamp for this prediction step
+                    step_time = last_update + (i + 1) * step_dt
+                    track.record_prediction_step(pred_state, pred_cov, step_time, step_dt)
+                
+                # Use final prediction for track state update
                 pred_state, pred_cov = predictions[-1]
             else:
                 pred_state, pred_cov = self.kf.predict(
                     track.state, track.covariance, track_time_gap
                 )
-
-            # Record prediction step
-            track.record_prediction_step(pred_state, pred_cov, current_time, track_time_gap)
+                # Record single prediction step
+                track.record_prediction_step(pred_state, pred_cov, current_time, track_time_gap)
 
             track.age += 1
             self.track_last_update_times[track.id] = current_time
@@ -219,7 +229,7 @@ class RadarTracker:
 
         def get_all_predictions(self) -> Dict[int, List[Dict]]:
             """Get prediction history for all tracks."""
-            return self.gap_predictions.copy()
+            return deepcopy(self.gap_predictions)
 
     def _predict_tracks(self, dt: float):
         """
@@ -536,7 +546,7 @@ class RadarTracker:
 
     def get_all_tracks(self) -> List[Track]:
         """Get all active tracks (confirmed and tentative)."""
-        return self.tracks.copy()
+        return deepcopy(self.tracks)
 
     def reset(self):
         """Reset tracker state."""

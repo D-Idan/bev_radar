@@ -3,6 +3,7 @@ import numpy as np
 from pathlib import Path
 from typing import List, Optional, Tuple
 from radar_tracking import Detection, Track
+from copy import deepcopy
 
 
 def prepare_output_directories(output_dir: str):
@@ -366,7 +367,7 @@ def visualize_avg_confidence_over_time(
         main_ax.set_xlabel('Time (seconds)', fontsize=12)
 
     plt.tight_layout()
-    save_path = Path(output_dir) / "enhanced_confidence_analysis.png"
+    save_path = Path(output_dir) / "detection_per_track_confidence.png"
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
 
@@ -385,15 +386,22 @@ def visualize_all_frames_3d_overview(
     import matplotlib.cm as cm
     import matplotlib.colors as mcolors
 
-    fig = plt.figure(figsize=(16, 12))
-    ax = fig.add_subplot(111, projection='3d')
-
     # Create frame_id to timestamp mapping
     frame_to_time = dict(frame_times)
 
-    # Collect all data points
-    gt_times, gt_az, gt_rng = [], [], []
-    det_times, det_az, det_rng = [], [], []
+    # Get time range for segmentation
+    timestamps = [frame_to_time.get(frame_id, frame_id) for frame_id in all_frames]
+    min_time = min(timestamps)
+    max_time = max(timestamps)
+    total_duration = max_time - min_time
+
+    # Create 3D subfolder
+    subfolder_3d = Path(output_dir) / "3d_segments"
+    subfolder_3d.mkdir(parents=True, exist_ok=True)
+
+    # Collect all data points first
+    all_gt_times, all_gt_az, all_gt_rng = [], [], []
+    all_det_times, all_det_az, all_det_rng = [], [], []
 
     # Create a color map for tracks
     unique_track_ids = set()
@@ -406,27 +414,27 @@ def visualize_all_frames_3d_overview(
                     for i, track_id in enumerate(unique_track_ids)}
 
     # Store track data with actual stored states
-    track_data = {}
+    all_track_data = {}
 
     for frame_idx, frame_id in enumerate(all_frames):
         timestamp = frame_to_time.get(frame_id, frame_id)
 
         # Ground truth
         for gt in all_ground_truth[frame_idx]:
-            gt_times.append(timestamp)
-            gt_az.append(np.degrees(gt.azimuth_rad))
-            gt_rng.append(gt.range_m)
+            all_gt_times.append(timestamp)
+            all_gt_az.append(np.degrees(gt.azimuth_rad))
+            all_gt_rng.append(gt.range_m)
 
         # Detections
         for det in all_detections[frame_idx]:
-            det_times.append(timestamp)
-            det_az.append(np.degrees(det.azimuth_rad))
-            det_rng.append(det.range_m)
+            all_det_times.append(timestamp)
+            all_det_az.append(np.degrees(det.azimuth_rad))
+            all_det_rng.append(det.range_m)
 
         # Tracks with stored prediction/update states
         for track in all_tracks[frame_idx]:
-            if track.id not in track_data:
-                track_data[track.id] = {
+            if track.id not in all_track_data:
+                all_track_data[track.id] = {
                     'update_states': [],  # After update (measurements)
                     'prediction_states': [],  # After prediction (no measurement)
                     'timestamps': []
@@ -436,8 +444,8 @@ def visualize_all_frames_3d_overview(
             range_m, azimuth_rad = track.kalman_polar_position
             azimuth_deg = np.degrees(azimuth_rad)
 
-            track_data[track.id]['update_states'].append((timestamp, azimuth_deg, range_m))
-            track_data[track.id]['timestamps'].append(timestamp)
+            all_track_data[track.id]['update_states'].append((timestamp, azimuth_deg, range_m))
+            all_track_data[track.id]['timestamps'].append(timestamp)
 
             # Add prediction state if available and different from update
             if (hasattr(track, 'predicted_state') and track.predicted_state is not None and
@@ -451,72 +459,133 @@ def visualize_all_frames_3d_overview(
                             entry['state'][0], entry['state'][1]
                         )
                         pred_azimuth_deg = np.degrees(pred_azimuth)
-                        track_data[track.id]['prediction_states'].append(
+                        all_track_data[track.id]['prediction_states'].append(
                             (timestamp, pred_azimuth_deg, pred_range)
                         )
                         break
 
-    # Plot ground truth and detections
-    if gt_times:
-        ax.scatter(gt_times, gt_az, gt_rng, c='green', marker='x', s=40,
-                   alpha=0.7, label='Ground Truth')
-    if det_times:
-        ax.scatter(det_times, det_az, det_rng, c='blue', s=15,
-                   alpha=0.5, label='Detections')
+    # Function to create a 3D plot for a time segment
+    def create_3d_plot(gt_times, gt_az, gt_rng, det_times, det_az, det_rng, track_data, 
+                       time_start, time_end, filename, title_suffix=""):
+        fig = plt.figure(figsize=(16, 12))
+        ax = fig.add_subplot(111, projection='3d')
 
-    # Plot tracks with stored states
-    for track_id, data in track_data.items():
-        if not data['update_states']:
-            continue
+        # Plot ground truth and detections
+        if gt_times:
+            ax.scatter(gt_times, gt_az, gt_rng, c='green', marker='x', s=40,
+                       alpha=0.7, label='Ground Truth')
+        if det_times:
+            ax.scatter(det_times, det_az, det_rng, c='blue', s=15,
+                       alpha=0.5, label='Detections')
 
-        color = track_colors[track_id]
+        # Plot tracks with stored states
+        for track_id, data in track_data.items():
+            if not data['update_states']:
+                continue
 
-        # Plot update states (solid line with circles)
-        times, azimuths, ranges = zip(*data['update_states'])
-        ax.plot(times, azimuths, ranges, color=color, linewidth=2.5, alpha=0.9,
-                label=f'Track {track_id} (Updates)', marker='o', markersize=4)
+            color = track_colors[track_id]
 
-        # Plot prediction states (dashed line with triangles)
-        if data['prediction_states']:
-            pred_times, pred_azimuths, pred_ranges = zip(*data['prediction_states'])
-            ax.plot(pred_times, pred_azimuths, pred_ranges,
-                    color=color, linewidth=1.5, alpha=0.6, linestyle='--',
-                    marker='^', markersize=3,
-                    label=f'Track {track_id} (Predictions)')
+            # Plot update states (solid line with circles)
+            times, azimuths, ranges = zip(*data['update_states'])
+            ax.plot(times, azimuths, ranges, color=color, linewidth=2.5, alpha=0.9,
+                    label=f'Track {track_id} (Updates)', marker='o', markersize=4)
 
-        # Add track ID at start
-        if times:
-            ax.text(times[0], azimuths[0], ranges[0], f"T{track_id}",
-                    color=color, fontsize=8, fontweight='bold')
+            # Plot prediction states (dashed line with triangles)
+            if data['prediction_states']:
+                pred_times, pred_azimuths, pred_ranges = zip(*data['prediction_states'])
+                ax.plot(pred_times, pred_azimuths, pred_ranges,
+                        color=color, linewidth=1.5, alpha=0.6, linestyle='--',
+                        marker='^', markersize=3,
+                        label=f'Track {track_id} (Predictions)')
 
-    ax.set_xlabel('Time (seconds)', fontsize=12)
-    ax.set_ylabel('Azimuth (degrees)', fontsize=12)
-    ax.set_zlabel('Range (meters)', fontsize=12)
-    ax.set_title('3D Radar Tracking: Stored Prediction vs Update States\n'
-                 'Solid: update states, Dashed: prediction states',
-                 fontsize=14)
+            # Add track ID at start
+            if times:
+                ax.text(times[0], azimuths[0], ranges[0], f"T{track_id}",
+                        color=color, fontsize=8, fontweight='bold')
 
-    # Enhanced legend
-    handles, labels = ax.get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys(), loc='best', fontsize=10)
+        ax.set_xlabel('Time (seconds)', fontsize=12)
+        ax.set_ylabel('Azimuth (degrees)', fontsize=12)
+        ax.set_zlabel('Range (meters)', fontsize=12)
+        ax.set_title(f'3D Radar Tracking: Stored Prediction vs Update States{title_suffix}\n'
+                     f'Time: {time_start:.1f}s - {time_end:.1f}s\n'
+                     'Solid: update states, Dashed: prediction states',
+                     fontsize=14)
 
-    ax.view_init(elev=20, azim=45)
+        # Enhanced legend
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys(), loc='best', fontsize=10)
 
-    plt.tight_layout()
-    save_path = Path(output_dir) / "3d_tracking_stored_states.png"
-    plt.savefig(save_path, dpi=200, bbox_inches='tight')
-    plt.close()
+        ax.view_init(elev=20, azim=45)
+
+        plt.tight_layout()
+        plt.savefig(filename, dpi=200, bbox_inches='tight')
+        plt.close()
+
+    # Create 20-second segments
+    segment_duration = 20.0
+    num_segments = int(np.ceil(total_duration / segment_duration))
+
+    for segment in range(num_segments):
+        segment_start = min_time + segment * segment_duration
+        segment_end = min(min_time + (segment + 1) * segment_duration, max_time)
+
+        # Filter data for this time segment
+        segment_gt_times = [t for t, az, rng in zip(all_gt_times, all_gt_az, all_gt_rng) 
+                           if segment_start <= t <= segment_end]
+        segment_gt_az = [az for t, az, rng in zip(all_gt_times, all_gt_az, all_gt_rng) 
+                        if segment_start <= t <= segment_end]
+        segment_gt_rng = [rng for t, az, rng in zip(all_gt_times, all_gt_az, all_gt_rng) 
+                         if segment_start <= t <= segment_end]
+
+        segment_det_times = [t for t, az, rng in zip(all_det_times, all_det_az, all_det_rng) 
+                            if segment_start <= t <= segment_end]
+        segment_det_az = [az for t, az, rng in zip(all_det_times, all_det_az, all_det_rng) 
+                         if segment_start <= t <= segment_end]
+        segment_det_rng = [rng for t, az, rng in zip(all_det_times, all_det_az, all_det_rng) 
+                          if segment_start <= t <= segment_end]
+
+        # Filter track data for this time segment
+        segment_track_data = {}
+        for track_id, data in all_track_data.items():
+            segment_track_data[track_id] = {
+                'update_states': [(t, az, rng) for t, az, rng in data['update_states'] 
+                                 if segment_start <= t <= segment_end],
+                'prediction_states': [(t, az, rng) for t, az, rng in data['prediction_states'] 
+                                     if segment_start <= t <= segment_end],
+                'timestamps': [t for t in data['timestamps'] 
+                              if segment_start <= t <= segment_end]
+            }
+
+        # Create plot for this segment
+        filename = subfolder_3d / f"3d_segment_{segment:02d}_{segment_start:.1f}s-{segment_end:.1f}s.png"
+        create_3d_plot(segment_gt_times, segment_gt_az, segment_gt_rng,
+                      segment_det_times, segment_det_az, segment_det_rng,
+                      segment_track_data, segment_start, segment_end, filename,
+                      f" (Segment {segment + 1}/{num_segments})")
+
+    # Create full scenario plot and save to summary folder
+    summary_folder = Path(output_dir).parent / "summary"
+    summary_folder.mkdir(parents=True, exist_ok=True)
+    
+    full_scenario_filename = summary_folder / "3d_tracking_full_scenario.png"
+    create_3d_plot(all_gt_times, all_gt_az, all_gt_rng,
+                  all_det_times, all_det_az, all_det_rng,
+                  all_track_data, min_time, max_time, full_scenario_filename,
+                  f" (Full Scenario - {total_duration:.1f}s)")
+
+    print(f"Created {num_segments} 3D segments of {segment_duration}s each")
+    print(f"Segments saved to: {subfolder_3d}")
+    print(f"Full scenario saved to: {full_scenario_filename}")
 
 
 def visualize_tracking_temporal_evolution(
-        all_detections: List[List[Detection]],
-        all_ground_truth: List[List[Detection]],
         all_tracks: List[List[Track]],
         all_frames: List[int],
         frame_times: List[Tuple[int, float]],
-        num_tracks: Optional[int] = 3,
-        output_dir: str = "tracking_temporal_evolution.png",
+        num_tracks: Optional[int] = 2,
+        radar_config: Optional[dict] = None,
+    output_dir: str = "tracking_temporal_evolution.png",
 ):
     """Create temporal visualization using stored prediction and update states."""
     prepare_output_directories(output_dir)
@@ -548,37 +617,59 @@ def visualize_tracking_temporal_evolution(
         ax = axes[i]
 
         # Extract stored state data
+        update_data = []
+        prediction_data = []
+        detection_data = []
         timestamps = []
-        update_ranges = []
-        prediction_ranges = []
-        update_times = []
-        prediction_times = []
-        detection_ranges = []
-        detection_times = []
 
+        # First, collect all unique prediction entries from the track's state_history
+        if (hasattr(track_history[0][1], 'state_history') and track_history[0][1].state_history):
+            # Get all prediction entries across the entire track lifetime
+            all_predictions = {}  # timestamp -> prediction_data to avoid duplicates
+            
+            # Iterate through all track instances to collect their state histories
+            for timestamp, track, frame_id in track_history:
+                if hasattr(track, 'state_history') and track.state_history:
+                    for entry in track.state_history:
+                        if entry['step_type'] == 'prediction' and entry.get('timestamp') is not None:
+                            pred_timestamp = entry['timestamp']
+                            # Only add if we haven't seen this timestamp before
+                            if pred_timestamp not in all_predictions:
+                                from radar_tracking.coordinate_transforms import cartesian_to_polar
+                                pred_range, _ = cartesian_to_polar(
+                                    entry['state'][0], entry['state'][1]
+                                )
+                                all_predictions[pred_timestamp] = pred_range
+            
+            # Convert to list format
+            for pred_timestamp, pred_range in all_predictions.items():
+                prediction_data.append((pred_timestamp, pred_range))
+
+        # Now collect update states and detections for each frame
         for timestamp, track, frame_id in track_history:
             # Update state (current position after measurement)
             range_m, _ = track.kalman_polar_position
             timestamps.append(timestamp)
-            update_ranges.append(range_m)
-            update_times.append(timestamp)
+            update_data.append((timestamp, range_m))
 
             # Detection data if available
             if track.last_detection:
-                detection_ranges.append(track.last_detection.range_m)
-                detection_times.append(timestamp)
+                detection_data.append((timestamp, track.last_detection.range_m))
 
-            # Prediction state from stored history if available
-            if (hasattr(track, 'state_history') and track.state_history):
-                for entry in reversed(track.state_history):
-                    if entry['step_type'] == 'prediction' and entry.get('timestamp'):
-                        from radar_tracking.coordinate_transforms import cartesian_to_polar
-                        pred_range, _ = cartesian_to_polar(
-                            entry['state'][0], entry['state'][1]
-                        )
-                        prediction_ranges.append(pred_range)
-                        prediction_times.append(entry['timestamp'])
-                        break
+        # Sort all data by timestamp
+        update_data.sort(key=lambda x: x[0])
+        prediction_data.sort(key=lambda x: x[0])
+        detection_data.sort(key=lambda x: x[0])
+        timestamps = np.sort(timestamps)
+
+        # Extract sorted times and ranges
+        update_times = [item[0] for item in update_data]
+        update_ranges = [item[1] for item in update_data]
+        prediction_times = [item[0] for item in prediction_data]
+        prediction_ranges = [item[1] for item in prediction_data]
+        detection_times = [item[0] for item in detection_data]
+        detection_ranges = [item[1] for item in detection_data]
+
 
         # Plot update states (solid line with circles)
         if update_times and update_ranges:
@@ -621,7 +712,7 @@ def visualize_tracking_temporal_evolution(
         ax.grid(True, alpha=0.3)
 
         # Set appropriate axis limits
-        if timestamps:
+        if timestamps.any():
             ax.set_xlim(min(timestamps) - 0.5, max(timestamps) + 0.5)
 
         # Add uncertainty analysis if available
@@ -659,12 +750,13 @@ def visualize_tracking_temporal_evolution(
     if axes.any():
         axes[-1].set_xlabel('Time (seconds)', fontsize=12)
 
-    plt.suptitle('Temporal Evolution: Stored Kalman Filter States\n'
+    plt.suptitle('Temporal Evolution:\n'
+                 'Stored Kalman Filter States\n'
                  'Actual prediction and update states from tracking system',
-                 fontsize=16, fontweight='bold', y=0.98)
+                 fontsize=14, fontweight='bold', y=0.93)
 
     plt.tight_layout()
-    plt.subplots_adjust(top=0.93)
+    plt.subplots_adjust(top=0.78)
 
     save_path = Path(output_dir) / "temporal_evolution_stored_states.png"
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
@@ -674,27 +766,22 @@ def visualize_tracking_temporal_evolution(
 def visualize_timing_analysis(frame_times: List[Tuple[int, float]],
                               time_gaps: List[float],
                               output_dir: str):
-    """Visualize frame timing and gaps."""
+    """Visualize frame timing and gaps - simplified to show only timeline."""
     prepare_output_directories(output_dir)
 
     frames, timestamps = zip(*frame_times)
 
-    # Recalculate time gaps correctly (excluding first measurement)
-    corrected_gaps = []
-    for i in range(1, len(timestamps)):
-        gap = timestamps[i] - timestamps[i - 1]
-        corrected_gaps.append(gap)
+    plt.figure(figsize=(12, 6))
+    ax1 = plt.gca()
 
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 10))
-
-    # 1. Timestamps vs Frame ID
+    # Plot timestamps vs Frame ID
     ax1.plot(frames, timestamps, 'b-', linewidth=1.5, marker='o', markersize=3)
     ax1.set_xlabel('Frame ID')
     ax1.set_ylabel('Timestamp (seconds)')
     ax1.set_title('Frame Timestamps - Corrected Timeline')
     ax1.grid(True, alpha=0.3)
 
-    # Highlight large gaps (but not the first "gap")
+    # Highlight large gaps
     for i in range(1, len(timestamps)):
         gap = timestamps[i] - timestamps[i - 1]
         if gap > 0.5:  # Gaps > 0.5s
@@ -705,57 +792,10 @@ def visualize_timing_analysis(frame_times: List[Tuple[int, float]],
                      ha='center', va='bottom', fontsize=8,
                      bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
 
-    # 2. Corrected time gaps histogram
-    if corrected_gaps:
-        ax2.hist(corrected_gaps, bins=50, edgecolor='black', alpha=0.7, color='green')
-        ax2.set_xlabel('Time Gap (seconds)')
-        ax2.set_ylabel('Frequency')
-        ax2.set_title('Distribution of Time Gaps Between Consecutive Frames\n(Excluding Initial Measurement)')
-        ax2.axvline(np.mean(corrected_gaps), color='red', linestyle='--',
-                    label=f'Mean: {np.mean(corrected_gaps):.3f}s')
-        ax2.axvline(np.median(corrected_gaps), color='orange', linestyle='--',
-                    label=f'Median: {np.median(corrected_gaps):.3f}s')
-        ax2.legend()
-
-    # 3. Corrected time gaps over frame sequence
-    if corrected_gaps:
-        ax3.plot(frames[1:], corrected_gaps, 'g-', linewidth=1.5, marker='o', markersize=2)
-        ax3.set_xlabel('Frame ID')
-        ax3.set_ylabel('Time Gap to Previous Frame (s)')
-        ax3.set_title('Time Gaps Throughout Sequence (Corrected)')
-        ax3.grid(True, alpha=0.3)
-
-        # Mark large gaps
-        large_gap_threshold = np.percentile(corrected_gaps, 95)
-        large_gaps = [(frames[i + 1], gap) for i, gap in enumerate(corrected_gaps)
-                      if gap > large_gap_threshold]
-        if large_gaps:
-            gap_frames, gap_values = zip(*large_gaps)
-            ax3.scatter(gap_frames, gap_values, color='red', s=50, zorder=5,
-                        label=f'Large gaps (>{large_gap_threshold:.2f}s)')
-            ax3.legend()
-
-        # Add statistics box
-        stats_text = (f'Total Frames: {len(frames)}\n'
-                      f'Time Span: {timestamps[-1] - timestamps[0]:.2f}s\n'
-                      f'Avg Gap: {np.mean(corrected_gaps):.3f}s\n'
-                      f'Max Gap: {np.max(corrected_gaps):.3f}s\n'
-                      f'Gaps >0.5s: {sum(1 for g in corrected_gaps if g > 0.5)}')
-
-        ax3.text(0.02, 0.98, stats_text, transform=ax3.transAxes,
-                 bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8),
-                 fontsize=9, verticalalignment='top')
-
     plt.tight_layout()
-    plt.savefig(Path(output_dir) / 'corrected_timing_analysis.png', dpi=150)
+    plt.savefig(Path(output_dir) / 'frame_timestamps_timeline.png', dpi=150)
     plt.close()
 
-    print(f"Timing Analysis Summary:")
-    print(f"  - Total measurements: {len(timestamps)}")
-    print(f"  - Time gaps calculated: {len(corrected_gaps)}")
-    if corrected_gaps:
-        print(f"  - Average gap: {np.mean(corrected_gaps):.3f}s")
-        print(f"  - Large gaps (>0.5s): {sum(1 for g in corrected_gaps if g > 0.5)}")
 
 
 def visualize_tracking_during_gaps(all_tracks: List[List[Track]],
@@ -814,13 +854,13 @@ def visualize_tracking_during_gaps(all_tracks: List[List[Track]],
 
         # Get stored prediction and update states
         prediction_state = None
-        update_state = track.state.copy()
+        update_state = deepcopy(track.state)
         uncertainty_before = None
         uncertainty_after = None
 
         # Extract prediction state if available
         if (hasattr(track, 'predicted_state') and track.predicted_state is not None):
-            prediction_state = track.predicted_state.copy()
+            prediction_state = deepcopy(track.predicted_state)
 
         # Get uncertainty from covariance
         if hasattr(track, 'covariance'):

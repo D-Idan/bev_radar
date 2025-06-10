@@ -1,6 +1,7 @@
 """
 Data structures for radar object detection and tracking system.
 """
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, List, Dict
 import numpy as np
@@ -86,16 +87,16 @@ class Track:
     def record_prediction_step(self, pred_state: np.ndarray, pred_cov: np.ndarray,
                                timestamp: Optional[float] = None, dt: float = None):
         """Record the prediction step results."""
-        self.predicted_state = pred_state.copy()
-        self.predicted_covariance = pred_cov.copy()
+        self.predicted_state = deepcopy(pred_state)
+        self.predicted_covariance = deepcopy(pred_cov)
 
         # Add to history
         self.state_history.append({
             'step_type': 'prediction',
             'timestamp': timestamp,
             'dt': dt,
-            'state': pred_state.copy(),
-            'covariance': pred_cov.copy(),
+            'state': deepcopy(pred_state),
+            'covariance': deepcopy(pred_cov),
             'uncertainty_trace': np.trace(pred_cov),
             'position_uncertainty': np.sqrt(pred_cov[0, 0] + pred_cov[1, 1])
         })
@@ -103,17 +104,17 @@ class Track:
     def record_update_step(self, updated_state: np.ndarray, updated_cov: np.ndarray,
                            detection: Detection, innovation: Optional[np.ndarray] = None):
         """Record the update step results."""
-        self.state = updated_state.copy()
-        self.covariance = updated_cov.copy()
+        self.state = deepcopy(updated_state)
+        self.covariance = deepcopy(updated_cov)
 
         # Add to history
         self.state_history.append({
             'step_type': 'update',
             'timestamp': detection.timestamp,
-            'state': updated_state.copy(),
-            'covariance': updated_cov.copy(),
+            'state': deepcopy(updated_state),
+            'covariance': deepcopy(updated_cov),
             'detection': detection,
-            'innovation': innovation.copy() if innovation is not None else None,
+            'innovation': deepcopy(innovation) if innovation is not None else None,
             'uncertainty_trace': np.trace(updated_cov),
             'position_uncertainty': np.sqrt(updated_cov[0, 0] + updated_cov[1, 1]),
             'uncertainty_reduction': (

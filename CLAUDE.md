@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a research project for radar-based object detection and tracking using deep learning. The codebase combines:
+This is a thesis work focused on improving radar-based object detection performance by applying Kalman filter tracking over deep learning network outputs. The key research contribution is handling variable time intervals in real-world radar data (RadIal dataset) where frame timestamps are not constant, unlike synthetic datasets with fixed time steps.
+
+The system combines detection and tracking to achieve better overall performance than detection alone. The codebase includes:
 
 1. **T_FFTRadNet**: A Vision Transformer-based neural network for radar object detection using FFT features
 2. **Radar Tracking System**: A SORT-like tracking implementation with Kalman filtering
@@ -80,9 +82,18 @@ All tracking outputs are organized in centralized directories:
 
 ## Code Organization Notes
 
+- **Variable Time Handling**: The Kalman filter uses actual timestamp differences (`dt`) from the RadIal dataset rather than assuming constant frame rates
 - All coordinate transformations handle polar radar coordinates properly
 - Confidence-based tracking supports multiple association strategies
 - Range culling prevents tracks from drifting outside sensor coverage
 - Visualization functions are modular and support batch processing
 - Track evaluation uses Hungarian algorithm for optimal assignment
 - The system maintains backward compatibility with configuration defaults
+
+## Research Context
+
+This thesis investigates whether post-processing deep learning detection outputs with tracking algorithms improves overall radar object detection performance. The RadIal dataset provides real-world automotive radar data with variable frame timing, making it ideal for testing tracking robustness in practical scenarios where constant frame rates cannot be assumed.
+
+## Algorithmic Documentation Notes
+
+- All algorithmic implementations, techniques, and issues for the thesis paper should be documented in the `readme_offline_tracker.md` file to aid in thesis and paper writing
