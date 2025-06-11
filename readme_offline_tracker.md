@@ -90,3 +90,12 @@ implement range culling to remove tracks that predict positions beyond the radar
    - Buffer zones prevent oscillating track creation/deletion
 
 The range culling will help prevent tracks from drifting outside the sensor's field of view and consuming computational resources on impossible track states. The buffer zones provide tolerance for tracking objects near the edge of coverage.
+
+
+# Gaps
+- if the gap is higher than a certain value we kill all tracks because the scene changes completely alter a number of seconds as 
+the radar platform is moving (driving car)
+- if a track got no update for a certain value of time we kill the track, gaps may cause objects to disappear in the middle of the map and not only at its way to the borders
+
+# Association and network confidence
+- we have tries multiple association methods for example mahalanobis distance that dont use the network output confidence and a weighted-confidence method that do use the network output confidence value.
