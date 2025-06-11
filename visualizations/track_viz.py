@@ -28,11 +28,12 @@ def visualize_frame_radar_azimuth(
 ):
     """
     Plot one frame in (azimuth_deg, range_m) space with radar coverage overlay and confidence ellipses.
+    Now includes a zoomed-in subplot showing only the data region.
     """
     prepare_output_directories(output_dir)
 
-    plt.figure(figsize=(10, 8))
-    ax = plt.gca()
+    # Create figure with two subplots side by side
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8), constrained_layout=True)
 
     # Extract radar parameters from config (with fallback defaults)
     if radar_config is None:
@@ -44,102 +45,201 @@ def visualize_frame_radar_azimuth(
     range_buffer = radar_config.get('range_buffer', 10.0)
     azimuth_buffer = radar_config.get('azimuth_buffer_deg', 5.0)
 
-    # Show radar coverage bounds
-    if show_coverage_bounds:
-        # Draw coverage area using config values
-        ax.axhline(y=max_range, color='gray', linestyle='--', alpha=0.5, label='Max Range')
-        ax.axvline(x=min_azimuth, color='gray', linestyle='--', alpha=0.5, label='Azimuth Limits')
-        ax.axvline(x=max_azimuth, color='gray', linestyle='--', alpha=0.5)
+    # Collect data points for zoom calculation
+    all_azimuths = []
+    all_ranges = []
 
-        # Calculate display bounds with buffer
-        display_max_range = max_range + range_buffer
-        display_min_azimuth = min_azimuth - azimuth_buffer
-        display_max_azimuth = max_azimuth + azimuth_buffer
-
-        # Shade out-of-coverage areas
-        ax.fill_between([min_azimuth, max_azimuth], max_range, display_max_range,
-                        color='red', alpha=0.1, label='Out of Coverage')
-        ax.fill([display_min_azimuth, min_azimuth, min_azimuth, display_min_azimuth],
-                [0, 0, display_max_range, display_max_range], color='red', alpha=0.1)
-        ax.fill([max_azimuth, display_max_azimuth, display_max_azimuth, max_azimuth],
-                [0, 0, display_max_range, display_max_range], color='red', alpha=0.1)
-
-    # Plot network output (blue circles)
     if detections:
-        az_det = [np.degrees(d.azimuth_rad) for d in detections]
-        rng_det = [d.range_m for d in detections]
-        conf_det = [d.confidence for d in detections]
+        all_azimuths.extend([np.degrees(d.azimuth_rad) for d in detections])
+        all_ranges.extend([d.range_m for d in detections])
 
-        # Color by confidence
-        scatter = ax.scatter(az_det, rng_det, c=conf_det, s=20,
-                             cmap='Blues', alpha=0.8, vmin=0, vmax=1,
-                             label='Network Output')
-        plt.colorbar(scatter, ax=ax, label='Confidence')
-
-    # Plot ground truth (green X)
     if ground_truth:
-        az_gt = [np.degrees(d.azimuth_rad) for d in ground_truth]
-        rng_gt = [d.range_m for d in ground_truth]
-        ax.scatter(az_gt, rng_gt, c='green', marker='x', s=60, label='Ground Truth')
+        all_azimuths.extend([np.degrees(d.azimuth_rad) for d in ground_truth])
+        all_ranges.extend([d.range_m for d in ground_truth])
 
-    # Plot tracks with confidence ellipses
-    for i, track in enumerate(active_tracks):
+    for track in active_tracks:
         range_m, azimuth_rad = track.kalman_polar_position
-        az_tr = np.degrees(azimuth_rad)
-        rng_tr = range_m
+        all_azimuths.append(np.degrees(azimuth_rad))
+        all_ranges.append(range_m)
 
-        # Plot track position (update state)
-        ax.scatter(az_tr, rng_tr, marker='^', s=20, facecolors='none', edgecolors='red',
-                   linewidths=0.8, label='Track Position' if i == 0 else "")
-        ax.text(az_tr + 0.2, rng_tr + 0.2, f"T{track.id}", color='red', fontsize=8)
-
-        # Plot prediction state if available
+        # Add prediction state if available
         if hasattr(track, 'predicted_state') and track.predicted_state is not None:
             from radar_tracking.coordinate_transforms import cartesian_to_polar
             pred_range, pred_azimuth = cartesian_to_polar(
                 track.predicted_state[0], track.predicted_state[1]
             )
-            pred_az_deg = np.degrees(pred_azimuth)
-            ax.scatter(pred_az_deg, pred_range, marker='o', s=15,
-                       facecolors='orange', edgecolors='darkorange', alpha=0.7,
-                       label='Prediction' if i == 0 else "")
+            all_azimuths.append(np.degrees(pred_azimuth))
+            all_ranges.append(pred_range)
 
-        # Draw confidence ellipses if enabled and covariance data is available
-        if show_confidence_ellipses and hasattr(track, 'covariance'):
-            # Update state ellipse (solid)
-            update_ellipse = create_confidence_ellipse_polar(
-                track.position, track.covariance[:2, :2], color='red', alpha=0.2
-            )
-            if update_ellipse:
-                ax.add_patch(update_ellipse)
+    # Calculate zoom bounds with minimal borders
+    zoom_border_az = 2.0  # degrees
+    zoom_border_range = 5.0  # meters
 
-            # Prediction state ellipse (dashed) if available
-            if hasattr(track, 'predicted_covariance') and track.predicted_covariance is not None:
-                pred_pos = (track.predicted_state[0], track.predicted_state[1])
-                pred_ellipse = create_confidence_ellipse_polar(
-                    pred_pos, track.predicted_covariance[:2, :2],
-                    color='orange', alpha=0.15, linestyle='--'
+    if all_azimuths and all_ranges:
+        zoom_min_az = min(all_azimuths) - zoom_border_az
+        zoom_max_az = max(all_azimuths) + zoom_border_az
+        zoom_min_range = max(0, min(all_ranges) - zoom_border_range)
+        zoom_max_range = max(all_ranges) + zoom_border_range
+    else:
+        # Fallback if no data
+        zoom_min_az, zoom_max_az = -10, 10
+        zoom_min_range, zoom_max_range = 0, 50
+
+    # Function to plot data on both axes
+    def plot_data_on_axis(ax, is_zoomed=False):
+        # Show radar coverage bounds (only on full view)
+        if show_coverage_bounds and not is_zoomed:
+            ax.axhline(y=max_range, color='gray', linestyle='--', alpha=0.5, label='Max Range')
+            ax.axvline(x=min_azimuth, color='gray', linestyle='--', alpha=0.5, label='Azimuth Limits')
+            ax.axvline(x=max_azimuth, color='gray', linestyle='--', alpha=0.5)
+
+            # Calculate display bounds with buffer
+            display_max_range = max_range + range_buffer
+            display_min_azimuth = min_azimuth - azimuth_buffer
+            display_max_azimuth = max_azimuth + azimuth_buffer
+
+            # Shade out-of-coverage areas
+            ax.fill_between([min_azimuth, max_azimuth], max_range, display_max_range,
+                            color='red', alpha=0.1, label='Out of Coverage')
+            ax.fill([display_min_azimuth, min_azimuth, min_azimuth, display_min_azimuth],
+                    [0, 0, display_max_range, display_max_range], color='red', alpha=0.1)
+            ax.fill([max_azimuth, display_max_azimuth, display_max_azimuth, max_azimuth],
+                    [0, 0, display_max_range, display_max_range], color='red', alpha=0.1)
+
+        # Plot network output (blue circles)
+        scatter = None
+        if detections:
+            az_det = [np.degrees(d.azimuth_rad) for d in detections]
+            rng_det = [d.range_m for d in detections]
+            conf_det = [d.confidence for d in detections]
+
+            # Color by confidence
+            scatter = ax.scatter(az_det, rng_det, c=conf_det, s=20,
+                                 cmap='Blues', alpha=0.8, vmin=0, vmax=1,
+                                 label='Network Output')
+
+        # Plot ground truth (green X)
+        if ground_truth:
+            az_gt = [np.degrees(d.azimuth_rad) for d in ground_truth]
+            rng_gt = [d.range_m for d in ground_truth]
+            ax.scatter(az_gt, rng_gt, c='green', marker='x', s=60, label='Ground Truth')
+
+        # Track whether we've added ellipse labels
+        has_update_ellipse = False
+        has_pred_ellipse = False
+
+        # Plot tracks with confidence ellipses
+        for i, track in enumerate(active_tracks):
+            range_m, azimuth_rad = track.kalman_polar_position
+            az_tr = np.degrees(azimuth_rad)
+            rng_tr = range_m
+
+            # Plot track position (update state)
+            ax.scatter(az_tr, rng_tr, marker='^', s=20, facecolors='none', edgecolors='red',
+                       linewidths=0.8, label='Track Position' if i == 0 else "")
+            ax.text(az_tr + 0.2, rng_tr + 0.2, f"T{track.id}", color='red', fontsize=8)
+
+            # Plot prediction state if available
+            if hasattr(track, 'predicted_state') and track.predicted_state is not None:
+                from radar_tracking.coordinate_transforms import cartesian_to_polar
+                pred_range, pred_azimuth = cartesian_to_polar(
+                    track.predicted_state[0], track.predicted_state[1]
                 )
-                if pred_ellipse:
-                    ax.add_patch(pred_ellipse)
+                pred_az_deg = np.degrees(pred_azimuth)
+                ax.scatter(pred_az_deg, pred_range, marker='o', s=15,
+                           facecolors='orange', edgecolors='darkorange', alpha=0.7,
+                           label='Prediction' if i == 0 else "")
 
-    ax.set_xlabel("Azimuth (deg)")
-    ax.set_ylabel("Range (m)")
-    ax.set_title(f"Frame {frame_id:06d} - Enhanced Radar Tracking Visualization")
-    ax.legend(loc='upper right', fontsize=8)
+            # Draw confidence ellipses if enabled and covariance data is available
+            if show_confidence_ellipses and hasattr(track, 'covariance'):
+                # Update state ellipse (solid)
+                update_ellipse = create_confidence_ellipse_polar(
+                    track.position, track.covariance[:2, :2], color='red', alpha=0.2
+                )
+                if update_ellipse:
+                    ax.add_patch(update_ellipse)
+                    if not has_update_ellipse:
+                        # Add invisible point for legend
+                        ax.scatter([], [], c='red', alpha=0.2, s=100, marker='o',
+                                   label='Update Confidence')
+                        has_update_ellipse = True
 
-    # Use config-based limits
-    display_min_azimuth = radar_config.get('min_azimuth_deg', -90.0) - radar_config.get('azimuth_buffer_deg', 5.0) - 5
-    display_max_azimuth = radar_config.get('max_azimuth_deg', 90.0) + radar_config.get('azimuth_buffer_deg', 5.0) + 5
-    display_max_range = radar_config.get('max_range', 103.0) + radar_config.get('range_buffer', 10.0) + 10
+                # Prediction state ellipse (dashed) if available
+                if hasattr(track, 'predicted_covariance') and track.predicted_covariance is not None:
+                    pred_pos = (track.predicted_state[0], track.predicted_state[1])
+                    pred_ellipse = create_confidence_ellipse_polar(
+                        pred_pos, track.predicted_covariance[:2, :2],
+                        color='orange', alpha=0.15, linestyle='--'
+                    )
+                    if pred_ellipse:
+                        ax.add_patch(pred_ellipse)
+                        if not has_pred_ellipse:
+                            # Add invisible point for legend
+                            ax.scatter([], [], c='orange', alpha=0.15, s=100, marker='o',
+                                       linestyle='--', label='Prediction Confidence')
+                            has_pred_ellipse = True
 
-    ax.set_xlim(display_min_azimuth, display_max_azimuth)
-    ax.set_ylim(0, display_max_range)
-    ax.grid(True, alpha=0.3)
+        return scatter
 
-    plt.tight_layout()
+    # Plot on both axes
+    scatter1 = plot_data_on_axis(ax1, is_zoomed=False)
+    scatter2 = plot_data_on_axis(ax2, is_zoomed=True)
+
+    # Set titles and labels
+    ax1.set_xlabel("Azimuth (deg)")
+    ax1.set_ylabel("Range (m)")
+    ax1.set_title(f"Frame {frame_id:06d} - Full Coverage View")
+
+    ax2.set_xlabel("Azimuth (deg)")
+    ax2.set_ylabel("Range (m)")
+    ax2.set_title(f"Frame {frame_id:06d} - Zoomed Data View")
+
+    # Set axis limits
+    # Full view with config-based limits
+    display_min_azimuth = min_azimuth - azimuth_buffer
+    display_max_azimuth = max_azimuth + azimuth_buffer
+    display_max_range = max_range + range_buffer
+
+    ax1.set_xlim(display_min_azimuth, display_max_azimuth)
+    ax1.set_ylim(0, display_max_range)
+
+    # Zoomed view
+    ax2.set_xlim(zoom_min_az, zoom_max_az)
+    ax2.set_ylim(zoom_min_range, zoom_max_range)
+
+    # Add grids
+    ax1.grid(True, alpha=0.3)
+    ax2.grid(True, alpha=0.3)
+
+    # Add single colorbar for confidence if we have detections
+    if detections and scatter1:
+        # Add colorbar to the right of the second subplot
+        cbar = fig.colorbar(scatter1, ax=[ax1, ax2], label='Confidence', pad=0.02)
+
+    # Add single legend to the first subplot
+    handles1, labels1 = ax1.get_legend_handles_labels()
+    ax1.legend(handles1, labels1, loc='upper right', fontsize=8)
+
+    # Add connection lines to show zoom relationship
+    if all_azimuths and all_ranges:
+        # Draw rectangle on full view showing zoom area
+        from matplotlib.patches import Rectangle
+        zoom_rect = Rectangle((zoom_min_az, zoom_min_range),
+                              zoom_max_az - zoom_min_az,
+                              zoom_max_range - zoom_min_range,
+                              linewidth=2, edgecolor='black', facecolor='none',
+                              linestyle=':', alpha=0.7)
+        ax1.add_patch(zoom_rect)
+
+        # Add annotation
+        ax1.text(zoom_min_az, zoom_max_range + 2, 'Zoom Area',
+                 fontsize=8, ha='left', style='italic')
+
+    plt.suptitle(f"Enhanced Radar Tracking Visualization - Frame {frame_id:06d}",
+                 fontsize=14, fontweight='bold')
+
     out_path = Path(output_dir) / f"frame_{frame_id:06d}.jpg"
-    plt.savefig(out_path, dpi=150)
+    plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close()
 
 
@@ -372,6 +472,25 @@ def visualize_avg_confidence_over_time(
     plt.close()
 
 
+def extract_all_predictions_for_track(track_history):
+    """Extract all unique prediction entries from a track's lifetime."""
+    all_predictions = {}  # timestamp -> (azimuth, range) to avoid duplicates
+
+    for timestamp, track, frame_id in track_history:
+        if hasattr(track, 'state_history') and track.state_history:
+            for entry in track.state_history:
+                if entry['step_type'] == 'prediction' and entry.get('timestamp') is not None:
+                    pred_timestamp = entry['timestamp']
+                    if pred_timestamp not in all_predictions:
+                        from radar_tracking.coordinate_transforms import cartesian_to_polar
+                        pred_range, pred_azimuth = cartesian_to_polar(
+                            entry['state'][0], entry['state'][1]
+                        )
+                        pred_azimuth_deg = np.degrees(pred_azimuth)
+                        all_predictions[pred_timestamp] = (pred_azimuth_deg, pred_range)
+
+    return [(timestamp, az, rng) for timestamp, (az, rng) in sorted(all_predictions.items())]
+
 def visualize_all_frames_3d_overview(
         all_detections: List[List[Detection]],
         all_ground_truth: List[List[Detection]],
@@ -415,6 +534,7 @@ def visualize_all_frames_3d_overview(
 
     # Store track data with actual stored states
     all_track_data = {}
+    track_lifespans = {}
 
     for frame_idx, frame_id in enumerate(all_frames):
         timestamp = frame_to_time.get(frame_id, frame_id)
@@ -431,41 +551,33 @@ def visualize_all_frames_3d_overview(
             all_det_az.append(np.degrees(det.azimuth_rad))
             all_det_rng.append(det.range_m)
 
-        # Tracks with stored prediction/update states
+        # Collect track lifespans
         for track in all_tracks[frame_idx]:
-            if track.id not in all_track_data:
-                all_track_data[track.id] = {
-                    'update_states': [],  # After update (measurements)
-                    'prediction_states': [],  # After prediction (no measurement)
-                    'timestamps': []
-                }
+            if track.id not in track_lifespans:
+                track_lifespans[track.id] = []
+            track_lifespans[track.id].append((timestamp, track, frame_id))
 
-            # Use actual Kalman state (after update)
+    # Second pass: extract predictions and updates
+    for track_id, track_history in track_lifespans.items():
+        all_track_data[track_id] = {
+            'update_states': [],
+            'prediction_states': [],
+            'timestamps': []
+        }
+
+        # Extract all predictions for this track
+        prediction_data = extract_all_predictions_for_track(track_history)
+        all_track_data[track_id]['prediction_states'] = prediction_data
+
+        # Extract update states
+        for timestamp, track, frame_id in track_history:
             range_m, azimuth_rad = track.kalman_polar_position
             azimuth_deg = np.degrees(azimuth_rad)
-
-            all_track_data[track.id]['update_states'].append((timestamp, azimuth_deg, range_m))
-            all_track_data[track.id]['timestamps'].append(timestamp)
-
-            # Add prediction state if available and different from update
-            if (hasattr(track, 'predicted_state') and track.predicted_state is not None and
-                    hasattr(track, 'state_history') and track.state_history):
-
-                # Get latest prediction from state history
-                for entry in reversed(track.state_history):
-                    if entry['step_type'] == 'prediction':
-                        from radar_tracking.coordinate_transforms import cartesian_to_polar
-                        pred_range, pred_azimuth = cartesian_to_polar(
-                            entry['state'][0], entry['state'][1]
-                        )
-                        pred_azimuth_deg = np.degrees(pred_azimuth)
-                        all_track_data[track.id]['prediction_states'].append(
-                            (timestamp, pred_azimuth_deg, pred_range)
-                        )
-                        break
+            all_track_data[track_id]['update_states'].append((timestamp, azimuth_deg, range_m))
+            all_track_data[track_id]['timestamps'].append(timestamp)
 
     # Function to create a 3D plot for a time segment
-    def create_3d_plot(gt_times, gt_az, gt_rng, det_times, det_az, det_rng, track_data, 
+    def create_3d_plot(gt_times, gt_az, gt_rng, det_times, det_az, det_rng, track_data,
                        time_start, time_end, filename, title_suffix=""):
         fig = plt.figure(figsize=(16, 12))
         ax = fig.add_subplot(111, projection='3d')
@@ -478,7 +590,11 @@ def visualize_all_frames_3d_overview(
             ax.scatter(det_times, det_az, det_rng, c='blue', s=15,
                        alpha=0.5, label='Detections')
 
-        # Plot tracks with stored states
+        # Plot tracks with stored states - simplified legend
+        legend_entries = ['Ground Truth', 'Detections']
+        has_updates = False
+        has_predictions = False
+
         for track_id, data in track_data.items():
             if not data['update_states']:
                 continue
@@ -487,34 +603,54 @@ def visualize_all_frames_3d_overview(
 
             # Plot update states (solid line with circles)
             times, azimuths, ranges = zip(*data['update_states'])
+            # Only add to legend for first track
+            update_label = 'Track Updates' if not has_updates else ""
             ax.plot(times, azimuths, ranges, color=color, linewidth=2.5, alpha=0.9,
-                    label=f'Track {track_id} (Updates)', marker='o', markersize=4)
+                    label=update_label, marker='o', markersize=4)
+            has_updates = True
 
             # Plot prediction states (dashed line with triangles)
             if data['prediction_states']:
                 pred_times, pred_azimuths, pred_ranges = zip(*data['prediction_states'])
+                # Only add to legend for first track
+                pred_label = 'Track Predictions' if not has_predictions else ""
                 ax.plot(pred_times, pred_azimuths, pred_ranges,
                         color=color, linewidth=1.5, alpha=0.6, linestyle='--',
-                        marker='^', markersize=3,
-                        label=f'Track {track_id} (Predictions)')
+                        marker='^', markersize=3, label=pred_label)
+                has_predictions = True
 
             # Add track ID at start
             if times:
                 ax.text(times[0], azimuths[0], ranges[0], f"T{track_id}",
                         color=color, fontsize=8, fontweight='bold')
 
+        # Add legend entries for what we actually have
+        if has_updates:
+            legend_entries.append('Track Updates')
+        if has_predictions:
+            legend_entries.append('Track Predictions')
+
         ax.set_xlabel('Time (seconds)', fontsize=12)
         ax.set_ylabel('Azimuth (degrees)', fontsize=12)
         ax.set_zlabel('Range (meters)', fontsize=12)
         ax.set_title(f'3D Radar Tracking: Stored Prediction vs Update States{title_suffix}\n'
                      f'Time: {time_start:.1f}s - {time_end:.1f}s\n'
-                     'Solid: update states, Dashed: prediction states',
+                     'Solid: update states, Dashed: prediction states\n'
+                     'Each color represents a unique track ID',
                      fontsize=14)
 
-        # Enhanced legend
+        # Clean legend with only the entries we want
         handles, labels = ax.get_legend_handles_labels()
-        by_label = dict(zip(labels, handles))
-        ax.legend(by_label.values(), by_label.keys(), loc='best', fontsize=10)
+        filtered_handles = []
+        filtered_labels = []
+
+        for handle, label in zip(handles, labels):
+            if label in legend_entries:
+                filtered_handles.append(handle)
+                filtered_labels.append(label)
+
+        if filtered_handles:
+            ax.legend(filtered_handles, filtered_labels, loc='best', fontsize=10)
 
         ax.view_init(elev=20, azim=45)
 
@@ -531,48 +667,48 @@ def visualize_all_frames_3d_overview(
         segment_end = min(min_time + (segment + 1) * segment_duration, max_time)
 
         # Filter data for this time segment
-        segment_gt_times = [t for t, az, rng in zip(all_gt_times, all_gt_az, all_gt_rng) 
-                           if segment_start <= t <= segment_end]
-        segment_gt_az = [az for t, az, rng in zip(all_gt_times, all_gt_az, all_gt_rng) 
-                        if segment_start <= t <= segment_end]
-        segment_gt_rng = [rng for t, az, rng in zip(all_gt_times, all_gt_az, all_gt_rng) 
-                         if segment_start <= t <= segment_end]
-
-        segment_det_times = [t for t, az, rng in zip(all_det_times, all_det_az, all_det_rng) 
+        segment_gt_times = [t for t, az, rng in zip(all_gt_times, all_gt_az, all_gt_rng)
                             if segment_start <= t <= segment_end]
-        segment_det_az = [az for t, az, rng in zip(all_det_times, all_det_az, all_det_rng) 
+        segment_gt_az = [az for t, az, rng in zip(all_gt_times, all_gt_az, all_gt_rng)
                          if segment_start <= t <= segment_end]
-        segment_det_rng = [rng for t, az, rng in zip(all_det_times, all_det_az, all_det_rng) 
+        segment_gt_rng = [rng for t, az, rng in zip(all_gt_times, all_gt_az, all_gt_rng)
                           if segment_start <= t <= segment_end]
+
+        segment_det_times = [t for t, az, rng in zip(all_det_times, all_det_az, all_det_rng)
+                             if segment_start <= t <= segment_end]
+        segment_det_az = [az for t, az, rng in zip(all_det_times, all_det_az, all_det_rng)
+                          if segment_start <= t <= segment_end]
+        segment_det_rng = [rng for t, az, rng in zip(all_det_times, all_det_az, all_det_rng)
+                           if segment_start <= t <= segment_end]
 
         # Filter track data for this time segment
         segment_track_data = {}
         for track_id, data in all_track_data.items():
             segment_track_data[track_id] = {
-                'update_states': [(t, az, rng) for t, az, rng in data['update_states'] 
-                                 if segment_start <= t <= segment_end],
-                'prediction_states': [(t, az, rng) for t, az, rng in data['prediction_states'] 
-                                     if segment_start <= t <= segment_end],
-                'timestamps': [t for t in data['timestamps'] 
-                              if segment_start <= t <= segment_end]
+                'update_states': [(t, az, rng) for t, az, rng in data['update_states']
+                                  if segment_start <= t <= segment_end],
+                'prediction_states': [(t, az, rng) for t, az, rng in data['prediction_states']
+                                      if segment_start <= t <= segment_end],
+                'timestamps': [t for t in data['timestamps']
+                               if segment_start <= t <= segment_end]
             }
 
         # Create plot for this segment
         filename = subfolder_3d / f"3d_segment_{segment:02d}_{segment_start:.1f}s-{segment_end:.1f}s.png"
         create_3d_plot(segment_gt_times, segment_gt_az, segment_gt_rng,
-                      segment_det_times, segment_det_az, segment_det_rng,
-                      segment_track_data, segment_start, segment_end, filename,
-                      f" (Segment {segment + 1}/{num_segments})")
+                       segment_det_times, segment_det_az, segment_det_rng,
+                       segment_track_data, segment_start, segment_end, filename,
+                       f" (Segment {segment + 1}/{num_segments})")
 
     # Create full scenario plot and save to summary folder
     summary_folder = Path(output_dir).parent / "summary"
     summary_folder.mkdir(parents=True, exist_ok=True)
-    
+
     full_scenario_filename = summary_folder / "3d_tracking_full_scenario.png"
     create_3d_plot(all_gt_times, all_gt_az, all_gt_rng,
-                  all_det_times, all_det_az, all_det_rng,
-                  all_track_data, min_time, max_time, full_scenario_filename,
-                  f" (Full Scenario - {total_duration:.1f}s)")
+                   all_det_times, all_det_az, all_det_rng,
+                   all_track_data, min_time, max_time, full_scenario_filename,
+                   f" (Full Scenario - {total_duration:.1f}s)")
 
     print(f"Created {num_segments} 3D segments of {segment_duration}s each")
     print(f"Segments saved to: {subfolder_3d}")
@@ -585,7 +721,7 @@ def visualize_tracking_temporal_evolution(
         frame_times: List[Tuple[int, float]],
         num_tracks: Optional[int] = 2,
         radar_config: Optional[dict] = None,
-    output_dir: str = "tracking_temporal_evolution.png",
+        output_dir: str = "tracking_temporal_evolution.png",
 ):
     """Create temporal visualization using stored prediction and update states."""
     prepare_output_directories(output_dir)
@@ -616,36 +752,18 @@ def visualize_tracking_temporal_evolution(
 
         ax = axes[i]
 
-        # Extract stored state data
+        # Use the helper function to extract predictions
+        prediction_data = extract_all_predictions_for_track(track_history)
+
+        # Convert to range-only data for temporal plot
+        prediction_times = [item[0] for item in prediction_data]
+        prediction_ranges = [item[2] for item in prediction_data]  # item[2] is range
+
+        # Extract update states and detections
         update_data = []
-        prediction_data = []
         detection_data = []
         timestamps = []
 
-        # First, collect all unique prediction entries from the track's state_history
-        if (hasattr(track_history[0][1], 'state_history') and track_history[0][1].state_history):
-            # Get all prediction entries across the entire track lifetime
-            all_predictions = {}  # timestamp -> prediction_data to avoid duplicates
-            
-            # Iterate through all track instances to collect their state histories
-            for timestamp, track, frame_id in track_history:
-                if hasattr(track, 'state_history') and track.state_history:
-                    for entry in track.state_history:
-                        if entry['step_type'] == 'prediction' and entry.get('timestamp') is not None:
-                            pred_timestamp = entry['timestamp']
-                            # Only add if we haven't seen this timestamp before
-                            if pred_timestamp not in all_predictions:
-                                from radar_tracking.coordinate_transforms import cartesian_to_polar
-                                pred_range, _ = cartesian_to_polar(
-                                    entry['state'][0], entry['state'][1]
-                                )
-                                all_predictions[pred_timestamp] = pred_range
-            
-            # Convert to list format
-            for pred_timestamp, pred_range in all_predictions.items():
-                prediction_data.append((pred_timestamp, pred_range))
-
-        # Now collect update states and detections for each frame
         for timestamp, track, frame_id in track_history:
             # Update state (current position after measurement)
             range_m, _ = track.kalman_polar_position
@@ -658,18 +776,14 @@ def visualize_tracking_temporal_evolution(
 
         # Sort all data by timestamp
         update_data.sort(key=lambda x: x[0])
-        prediction_data.sort(key=lambda x: x[0])
         detection_data.sort(key=lambda x: x[0])
         timestamps = np.sort(timestamps)
 
         # Extract sorted times and ranges
         update_times = [item[0] for item in update_data]
         update_ranges = [item[1] for item in update_data]
-        prediction_times = [item[0] for item in prediction_data]
-        prediction_ranges = [item[1] for item in prediction_data]
         detection_times = [item[0] for item in detection_data]
         detection_ranges = [item[1] for item in detection_data]
-
 
         # Plot update states (solid line with circles)
         if update_times and update_ranges:
