@@ -45,6 +45,8 @@ class RadarTracker:
                  max_azimuth_deg: float = 90.0,
                  range_buffer: float = 10.0,
                  azimuth_buffer_deg: float = 5.0,
+                 max_time_without_update: float = 2.0,  # Kill track after 2s without update
+                 max_frame_gap_time: float = 5.0,  # Kill all tracks if gap > 5s
                  ):
         """
         Initialize radar tracker with timestamp support.
@@ -74,6 +76,9 @@ class RadarTracker:
         self.max_dt_gap = max_dt_gap
         self.prediction_history = {}  # Track ID -> list of predictions
         self.gap_predictions = {}     # Track ID -> predictions during gaps
+        self.max_time_without_update = max_time_without_update
+        self.max_frame_gap_time = max_frame_gap_time
+        self.track_last_update_times = {}  # Track ID -> last update timestamp
 
         # Confidence-based parameters
         self.min_confidence_init = min_confidence_init
@@ -128,6 +133,13 @@ class RadarTracker:
         if current_time is not None and self.last_update_time is not None:
             # Use actual time difference when timestamps are available
             frame_dt = current_time - self.last_update_time
+
+            # If gap too large, kill all tracks
+            if frame_dt > self.max_frame_gap_time:
+                print(f"Large time gap detected ({frame_dt:.2f}s), killing all tracks")
+                self.tracks = []
+                self.track_last_update_times = {}
+
         elif dt is not None:
             # Use provided dt
             frame_dt = dt
@@ -164,8 +176,14 @@ class RadarTracker:
 
         # Handle unmatched tracks
         for track_idx in unmatched_tracks:
-            self.tracks[track_idx].time_since_update += 1
-            self.tracks[track_idx].age += 1
+            track = self.tracks[track_idx]
+            # Update current state to predicted state (if prediction was made)
+            if hasattr(track, 'predicted_state') and track.predicted_state is not None:
+                track.state = track.predicted_state.copy()
+                track.covariance = track.predicted_covariance.copy()
+
+            track.time_since_update += 1
+            # Note: track.age is already incremented in prediction step
 
         # Create new tracks from unmatched detections (apply confidence threshold)
         for det_idx in unmatched_detections:
@@ -180,29 +198,50 @@ class RadarTracker:
 
         # Update last update time if provided
         if current_time is not None:
+            # After processing matches, check time-based termination
+            self._remove_time_expired_tracks(current_time)
             self.last_update_time = current_time
 
         return self._get_confirmed_tracks()
 
+    def _remove_time_expired_tracks(self, current_time: float):
+        """Remove tracks that haven't been updated within time threshold."""
+        tracks_to_keep = []
+
+        for track in self.tracks:
+            last_update = self.track_last_update_times.get(track.id, current_time)
+            time_since_update = current_time - last_update
+
+            if time_since_update <= self.max_time_without_update:
+                tracks_to_keep.append(track)
+            else:
+                print(f"Track {track.id} killed: {time_since_update:.2f}s without update")
+
+        self.tracks = tracks_to_keep
+
     def _predict_tracks_with_timestamp(self, current_time: float, time_gap: float):
         """
         Predict tracks considering actual time gaps with multi-step prediction for large gaps.
+        Remove those predicted outside radar coverage.
 
         Args:
             current_time: Current timestamp in seconds
             time_gap: Time since last update in seconds
         """
+        tracks_to_keep = []
+
         for track in self.tracks:
             # Get time since last update for this specific track
-            last_update = self.track_last_update_times.get(track.id,
-                                                           current_time - time_gap)
+            last_update = self.track_last_update_times.get(track.id, current_time - time_gap)
             track_time_gap = current_time - last_update
 
+            # Perform prediction (either single-step or multi-step)
             if track_time_gap > self.max_dt_gap:
+                # Multi-step prediction for large gaps
                 predictions = self.kf.multi_step_predict(
                     track.state, track.covariance, track_time_gap, self.base_dt
                 )
-                
+
                 # Record all intermediate prediction steps
                 num_steps = len(predictions)
                 step_dt = track_time_gap / num_steps
@@ -210,26 +249,47 @@ class RadarTracker:
                     # Calculate timestamp for this prediction step
                     step_time = last_update + (i + 1) * step_dt
                     track.record_prediction_step(pred_state, pred_cov, step_time, step_dt)
-                
-                # Use final prediction for track state update
+
+                # Use final prediction for culling check
                 pred_state, pred_cov = predictions[-1]
             else:
+                # Single-step prediction
                 pred_state, pred_cov = self.kf.predict(
                     track.state, track.covariance, track_time_gap
                 )
                 # Record single prediction step
                 track.record_prediction_step(pred_state, pred_cov, current_time, track_time_gap)
 
-            track.age += 1
-            self.track_last_update_times[track.id] = current_time
+            # Check if predicted position is within coverage (applies to both cases)
+            if self._is_track_within_coverage_predicted(pred_state):
+                # Track is within coverage - keep it
+                track.predicted_state = pred_state
+                track.predicted_covariance = pred_cov
+                track.age += 1
+                tracks_to_keep.append(track)
+                self.track_last_update_times[track.id] = current_time
+            else:
+                # Track predicted outside coverage - kill it
+                self.tracks_culled_by_range += 1
+                print(f"Track {track.id} culled: predicted outside radar coverage")
 
-        def get_track_predictions(self, track_id: int) -> List[Dict]:
-            """Get prediction history for a specific track."""
-            return self.gap_predictions.get(track_id, [])
+        # Update tracks list (IMPORTANT: correct indentation)
+        self.tracks = tracks_to_keep
 
-        def get_all_predictions(self) -> Dict[int, List[Dict]]:
-            """Get prediction history for all tracks."""
-            return deepcopy(self.gap_predictions)
+    def _is_track_within_coverage_predicted(self, predicted_state: np.ndarray) -> bool:
+        """Check if predicted state is within radar coverage."""
+        x, y = predicted_state[0], predicted_state[1]
+        range_m, azimuth_rad = cartesian_to_polar(x, y)
+        azimuth_deg = np.degrees(azimuth_rad)
+
+        # Apply buffer zones
+        max_range_check = self.max_range + self.range_buffer
+        min_range_check = -self.range_buffer
+        min_azimuth_check = self.min_azimuth_deg - self.azimuth_buffer_deg
+        max_azimuth_check = self.max_azimuth_deg + self.azimuth_buffer_deg
+
+        return (min_range_check <= range_m <= max_range_check and
+                min_azimuth_check <= azimuth_deg <= max_azimuth_check)
 
     def _predict_tracks(self, dt: float):
         """
@@ -508,6 +568,10 @@ class RadarTracker:
         track.hits += 1
         track.time_since_update = 0
         track.confidence = detection.confidence
+
+        # Update track timestamp
+        if hasattr(detection, 'timestamp'):
+            self.track_last_update_times[track.id] = detection.timestamp
 
         return track
 
