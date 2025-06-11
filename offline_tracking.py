@@ -535,7 +535,7 @@ if __name__ == "__main__":
     custom_tracker_config = {
         'max_age': 3,
         'min_hits': 3,
-        'iou_threshold': 60.0,
+        'iou_threshold': 83.3 * 0.1, # 300 km/h = 83.3 m/s,
         'base_dt': 0.2,  # 200ms base time step
         'max_dt_gap': 1.0,  # Trigger multi-step prediction for gaps > 1.0s
         'max_time_without_update': 2.0,  # Kill tracks after 2 seconds
