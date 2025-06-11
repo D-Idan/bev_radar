@@ -98,4 +98,4 @@ the radar platform is moving (driving car)
 - if a track got no update for a certain value of time we kill the track, gaps may cause objects to disappear in the middle of the map and not only at its way to the borders
 
 # Association and network confidence
-- we have tries multiple association methods for example mahalanobis distance that dont use the network output confidence and a weighted-confidence method that do use the network output confidence value.
+- we have tries multiple association methods for example mahalanobis distance that dont use the network output confidence and a weighted-confidence method that do use the network output confidence value. gate first (reject impossible associations) then use costs for the remaining valid ones.
