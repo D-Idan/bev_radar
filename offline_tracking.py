@@ -545,7 +545,14 @@ if __name__ == "__main__":
         'min_confidence_init': 0.5,
         'min_confidence_assoc': 0.2,
         'confidence_weight': 0.3,
-        'association_strategy': 'confidence_weighted', #  "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
+        'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
+
+        # Mahalanobis distance parameters
+        'use_mahalanobis': True,
+        'chi2_threshold_95': 5.991,    # 95% confidence for 2 DOF
+        'chi2_threshold_99': 9.210,    # 99% confidence for 2 DOF
+        'chi2_threshold_99_9': 13.816, # 99.9% confidence for 2 DOF
+        'default_chi2_threshold': 5.991,  # Use 95% as default
 
         # Range culling parameters - configured for your radar
         'enable_range_culling': True,

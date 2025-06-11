@@ -45,6 +45,11 @@ def visualize_frame_radar_azimuth(
     range_buffer = radar_config.get('range_buffer', 10.0)
     azimuth_buffer = radar_config.get('azimuth_buffer_deg', 5.0)
 
+    # Chi-square thresholds for visualization
+    chi2_95 = radar_config.get('chi2_threshold_95', 5.991)
+    chi2_99 = radar_config.get('chi2_threshold_99', 9.210)
+    chi2_99_9 = radar_config.get('chi2_threshold_99_9', 13.816)
+
     # Collect data points for zoom calculation
     all_azimuths = []
     all_ranges = []
@@ -127,8 +132,11 @@ def visualize_frame_radar_azimuth(
         # Track whether we've added ellipse labels
         has_update_ellipse = False
         has_pred_ellipse = False
+        has_chi2_95 = False
+        has_chi2_99 = False
+        has_chi2_99_9 = False
 
-        # Plot tracks with confidence ellipses
+        # Plot tracks with multiple threshold ellipses
         for i, track in enumerate(active_tracks):
             range_m, azimuth_rad = track.kalman_polar_position
             az_tr = np.degrees(azimuth_rad)
@@ -150,34 +158,44 @@ def visualize_frame_radar_azimuth(
                            facecolors='orange', edgecolors='darkorange', alpha=0.7,
                            label='Prediction' if i == 0 else "")
 
-            # Draw confidence ellipses if enabled and covariance data is available
+            # Draw multiple threshold ellipses if enabled
             if show_confidence_ellipses and hasattr(track, 'covariance'):
-                # Update state ellipse (solid)
-                update_ellipse = create_confidence_ellipse_polar(
-                    track.position, track.covariance[:2, :2], color='red', alpha=0.2
-                )
-                if update_ellipse:
-                    ax.add_patch(update_ellipse)
-                    if not has_update_ellipse:
-                        # Add invisible point for legend
-                        ax.scatter([], [], c='red', alpha=0.2, s=100, marker='o',
-                                   label='Update Confidence')
-                        has_update_ellipse = True
 
-                # Prediction state ellipse (dashed) if available
-                if hasattr(track, 'predicted_covariance') and track.predicted_covariance is not None:
-                    pred_pos = (track.predicted_state[0], track.predicted_state[1])
-                    pred_ellipse = create_confidence_ellipse_polar(
-                        pred_pos, track.predicted_covariance[:2, :2],
-                        color='orange', alpha=0.15, linestyle='--'
-                    )
-                    if pred_ellipse:
-                        ax.add_patch(pred_ellipse)
-                        if not has_pred_ellipse:
-                            # Add invisible point for legend
-                            ax.scatter([], [], c='orange', alpha=0.15, s=100, marker='o',
-                                       linestyle='--', label='Prediction Confidence')
-                            has_pred_ellipse = True
+                # Chi-square 95% ellipse (solid red)
+                ellipse_95 = create_chi2_confidence_ellipse_polar(
+                    track.position, track.covariance[:2, :2], chi2_95,
+                    color='red', alpha=0.15, linestyle='-', linewidth=1
+                )
+                if ellipse_95:
+                    ax.add_patch(ellipse_95)
+                    if not has_chi2_95:
+                        ax.scatter([], [], c='red', alpha=0.15, s=80, marker='o',
+                                   label=f'χ² 95% ({chi2_95:.1f})')
+                        has_chi2_95 = True
+
+                # Chi-square 99% ellipse (dashed orange)
+                ellipse_99 = create_chi2_confidence_ellipse_polar(
+                    track.position, track.covariance[:2, :2], chi2_99,
+                    color='orange', alpha=0.12, linestyle='--', linewidth=1.5
+                )
+                if ellipse_99:
+                    ax.add_patch(ellipse_99)
+                    if not has_chi2_99:
+                        ax.scatter([], [], c='orange', alpha=0.12, s=80, marker='s',
+                                   label=f'χ² 99% ({chi2_99:.1f})')
+                        has_chi2_99 = True
+
+                # Chi-square 99.9% ellipse (dotted purple)
+                ellipse_99_9 = create_chi2_confidence_ellipse_polar(
+                    track.position, track.covariance[:2, :2], chi2_99_9,
+                    color='purple', alpha=0.1, linestyle=':', linewidth=2
+                )
+                if ellipse_99_9:
+                    ax.add_patch(ellipse_99_9)
+                    if not has_chi2_99_9:
+                        ax.scatter([], [], c='purple', alpha=0.1, s=80, marker='^',
+                                   label=f'χ² 99.9% ({chi2_99_9:.1f})')
+                        has_chi2_99_9 = True
 
         return scatter
 
@@ -195,7 +213,6 @@ def visualize_frame_radar_azimuth(
     ax2.set_title(f"Frame {frame_id:06d} - Zoomed Data View")
 
     # Set axis limits
-    # Full view with config-based limits
     display_min_azimuth = min_azimuth - azimuth_buffer
     display_max_azimuth = max_azimuth + azimuth_buffer
     display_max_range = max_range + range_buffer
@@ -203,7 +220,6 @@ def visualize_frame_radar_azimuth(
     ax1.set_xlim(display_min_azimuth, display_max_azimuth)
     ax1.set_ylim(0, display_max_range)
 
-    # Zoomed view
     ax2.set_xlim(zoom_min_az, zoom_max_az)
     ax2.set_ylim(zoom_min_range, zoom_max_range)
 
@@ -211,18 +227,16 @@ def visualize_frame_radar_azimuth(
     ax1.grid(True, alpha=0.3)
     ax2.grid(True, alpha=0.3)
 
-    # Add single colorbar for confidence if we have detections
+    # Add colorbar for confidence if we have detections
     if detections and scatter1:
-        # Add colorbar to the right of the second subplot
         cbar = fig.colorbar(scatter1, ax=[ax1, ax2], label='Confidence', pad=0.02)
 
-    # Add single legend to the first subplot
+    # Add legend to the first subplot
     handles1, labels1 = ax1.get_legend_handles_labels()
-    ax1.legend(handles1, labels1, loc='upper right', fontsize=8)
+    ax1.legend(handles1, labels1, loc='upper right', fontsize=7, ncol=2)
 
-    # Add connection lines to show zoom relationship
+    # Draw rectangle on full view showing zoom area
     if all_azimuths and all_ranges:
-        # Draw rectangle on full view showing zoom area
         from matplotlib.patches import Rectangle
         zoom_rect = Rectangle((zoom_min_az, zoom_min_range),
                               zoom_max_az - zoom_min_az,
@@ -230,12 +244,10 @@ def visualize_frame_radar_azimuth(
                               linewidth=2, edgecolor='black', facecolor='none',
                               linestyle=':', alpha=0.7)
         ax1.add_patch(zoom_rect)
-
-        # Add annotation
         ax1.text(zoom_min_az, zoom_max_range + 2, 'Zoom Area',
                  fontsize=8, ha='left', style='italic')
 
-    plt.suptitle(f"Enhanced Radar Tracking Visualization - Frame {frame_id:06d}",
+    plt.suptitle(f"Mahalanobis Distance Tracking - Frame {frame_id:06d}",
                  fontsize=14, fontweight='bold')
 
     out_path = Path(output_dir) / f"frame_{frame_id:06d}.jpg"
@@ -243,12 +255,14 @@ def visualize_frame_radar_azimuth(
     plt.close()
 
 
-def create_confidence_ellipse_polar(position: Tuple[float, float],
-                                    covariance: np.ndarray,
-                                    color: str = 'red',
-                                    alpha: float = 0.3,
-                                    linestyle: str = '-') -> Optional['Ellipse']:
-    """Create confidence ellipse in polar coordinates for radar display."""
+def create_chi2_confidence_ellipse_polar(position: Tuple[float, float],
+                                         covariance: np.ndarray,
+                                         chi2_threshold: float,
+                                         color: str = 'red',
+                                         alpha: float = 0.3,
+                                         linestyle: str = '-',
+                                         linewidth: float = 1) -> Optional['Ellipse']:
+    """Create chi-square confidence ellipse in polar coordinates for radar display."""
     from matplotlib.patches import Ellipse
     from radar_tracking.coordinate_transforms import cartesian_to_polar
 
@@ -260,20 +274,18 @@ def create_confidence_ellipse_polar(position: Tuple[float, float],
         # Eigenvalues and eigenvectors of covariance
         eigenvals, eigenvecs = np.linalg.eigh(covariance)
 
-        # Convert eigenvalues to standard deviations (95% confidence)
-        chi2_val = 5.991  # 95% confidence
-        width = 2 * np.sqrt(chi2_val * eigenvals[0])
-        height = 2 * np.sqrt(chi2_val * eigenvals[1])
+        # Convert eigenvalues to ellipse dimensions using chi-square threshold
+        width = 2 * np.sqrt(chi2_threshold * eigenvals[0])
+        height = 2 * np.sqrt(chi2_threshold * eigenvals[1])
 
         # Angle of ellipse
         angle = np.degrees(np.arctan2(eigenvecs[1, 0], eigenvecs[0, 0]))
 
-        # Create ellipse in Cartesian space, then transform display coordinates
-        # For radar display, we approximate the ellipse in polar coordinates
+        # Create ellipse in polar coordinates (approximate)
         ellipse = Ellipse((azimuth_deg, range_m),
-                          width=np.degrees(width / range_m), height=height,
+                          width=np.degrees(width / max(range_m, 1)), height=height,
                           angle=angle, alpha=alpha, facecolor=color,
-                          edgecolor=color, linestyle=linestyle)
+                          edgecolor=color, linestyle=linestyle, linewidth=linewidth)
         return ellipse
     except:
         return None
