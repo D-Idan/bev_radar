@@ -145,6 +145,45 @@ class TrackingVisualizationTool:
             cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
             return img
 
+        def add_track_flag(img, bbox, track_id):
+            """Add track ID flag similar to BEV visualization."""
+            x1, y1, x2, y2 = map(int, bbox)
+            # Position flag at top-left corner of bounding box
+            flag_x, flag_y = x2 + 5, y1 - 5  # 5 pixels right of box, 5 pixels above
+
+            # Create flag text
+            flag_text = f"T{track_id}"
+
+            # Get text size for background rectangle
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.4
+            thickness = 1
+            (text_width, text_height), baseline = cv2.getTextSize(flag_text, font, font_scale, thickness)
+
+            # Draw background rectangle (white with red border)
+            padding = 1
+            bg_x1 = flag_x - padding
+            bg_y1 = flag_y - text_height - baseline - padding
+            bg_x2 = flag_x + text_width + padding
+            bg_y2 = flag_y + baseline + padding
+
+            # Ensure flag stays within image bounds
+            bg_x1 = max(0, bg_x1)
+            bg_y1 = max(0, bg_y1)
+            bg_x2 = min(img.shape[1], bg_x2)
+            bg_y2 = min(img.shape[0], bg_y2)
+
+            # Draw white background
+            cv2.rectangle(img, (bg_x1, bg_y1), (bg_x2, bg_y2), (255, 255, 255), -1)
+            # Draw red border
+            cv2.rectangle(img, (bg_x1, bg_y1), (bg_x2, bg_y2), (255, 0, 0), 1)
+
+            # Draw text
+            text_y = flag_y - baseline
+            cv2.putText(img, flag_text, (flag_x, text_y), font, font_scale, (255, 0, 0), thickness)
+
+            return img
+
         # Labels (green)
         for _, row in labels_df.iterrows():
             scale_w, scale_h = self._get_scale_factor(image)
@@ -170,6 +209,8 @@ class TrackingVisualizationTool:
         if tracks_df is not None and not tracks_df.empty:
             for _, row in tracks_df.iterrows():
                 range_m, azimuth_deg = row['range_m'], row['azimuth_deg']
+                track_id = row['track_id']
+
                 x = np.sin(np.deg2rad(azimuth_deg)) * range_m
                 y = np.cos(np.deg2rad(azimuth_deg)) * range_m
 
@@ -180,6 +221,9 @@ class TrackingVisualizationTool:
 
                 bbox = (u1, v1, u2, v2)
                 image = draw_simple_bbox(image, bbox, (255, 0, 0), 1)  # Red in RGB
+
+                # Add track flag
+                image = add_track_flag(image, bbox, track_id)
 
         return image
 
