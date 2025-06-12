@@ -99,3 +99,11 @@ the radar platform is moving (driving car)
 
 # Association and network confidence
 - we have tries multiple association methods for example mahalanobis distance that dont use the network output confidence and a weighted-confidence method that do use the network output confidence value. gate first (reject impossible associations) then use costs for the remaining valid ones.
+
+# Scenarios documentation
+**Scenario:** `RECORD@2020-11-22_12.54.38`
+**Frames 001975 - 001991:**
+- Using **WEITHGET DISTANCE** leads to a swap in track 1.  
+- Using the standard Mahalanobis (without considering confidence) avoids the track swap; however, an extra false track is initiated and then closed.
+**Additional Note:**
+- Some measurements have low confidence. We plan to develop a new cost function that incorporates both the Mahalanobis distance and confidence—possibly using an adaptive R in the Kalman filter.
