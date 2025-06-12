@@ -545,7 +545,7 @@ if __name__ == "__main__":
         'min_confidence_init': 0.5,
         'min_confidence_assoc': 0.2,
         'confidence_weight': 0.3,
-        'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
+        'association_strategy': 'confidence_weighted', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
 
         # Mahalanobis distance parameters
         'use_mahalanobis': True,
@@ -569,7 +569,7 @@ if __name__ == "__main__":
         'output_dir': str(path_file_par / Path('plots/tracking_output')),
         'tracker_config': custom_tracker_config,
         'create_video': True,
-        'max_video_samples': 50  # Limit video to first 50 samples for performance
+        'max_video_samples': None #50  # Limit video to first 50 samples for performance
     }
 
     offline_tracking(**args)
