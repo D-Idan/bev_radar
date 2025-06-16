@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from matplotlib import cm
 import numpy as np
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -118,16 +119,19 @@ def visualize_frame_radar_azimuth(
             rng_det = [d.range_m for d in detections]
             conf_det = [d.confidence for d in detections]
 
-            # Color by confidence
-            scatter = ax.scatter(az_det, rng_det, c=conf_det, s=20,
-                                 cmap='Blues', alpha=0.8, vmin=0, vmax=1,
+            # Create 5 discrete blue bins
+            conf_bins = np.digitize(conf_det, bins=[0, 0.4, 0.6, 0.8, 0.9, 1.0]) - 1
+            blue_colors = plt.cm.get_cmap('Blues')(np.linspace(0.3, 1.0, 5))  # 5 blue shades
+            colors = [blue_colors[bin_idx] for bin_idx in conf_bins]
+
+            scatter = ax.scatter(az_det, rng_det, c=colors, s=50, alpha=0.8,
                                  label='Network Output')
 
         # Plot ground truth (green X)
         if ground_truth:
             az_gt = [np.degrees(d.azimuth_rad) for d in ground_truth]
             rng_gt = [d.range_m for d in ground_truth]
-            ax.scatter(az_gt, rng_gt, c='green', marker='x', s=60, label='Ground Truth')
+            ax.scatter(az_gt, rng_gt, c='green', marker='x', s=100, label='Ground Truth')
 
         # Track whether we've added ellipse labels
         has_update_ellipse = False
@@ -143,7 +147,7 @@ def visualize_frame_radar_azimuth(
             rng_tr = range_m
 
             # Plot track position (update state)
-            ax.scatter(az_tr, rng_tr, marker='^', s=20, facecolors='none', edgecolors='red',
+            ax.scatter(az_tr, rng_tr, marker='^', s=50, facecolors='none', edgecolors='red',
                        linewidths=0.8, label='Track Position' if i == 0 else "")
             ax.text(az_tr + 0.2, rng_tr + 0.2, f"T{track.id}", color='red', fontsize=8)
 
@@ -228,8 +232,17 @@ def visualize_frame_radar_azimuth(
     ax2.grid(True, alpha=0.3)
 
     # Add colorbar for confidence if we have detections
-    if detections and scatter1:
-        cbar = fig.colorbar(scatter1, ax=[ax1, ax2], label='Confidence', pad=0.02)
+    if detections:
+        from matplotlib.colors import ListedColormap
+        blue_colors = plt.cm.get_cmap('Blues')(np.linspace(0.3, 1.0, 5))
+        blue_cmap = ListedColormap(blue_colors)
+        sm = plt.cm.ScalarMappable(cmap=blue_cmap,
+                                   norm=plt.Normalize(vmin=0, vmax=1))
+        sm.set_array([])
+
+        cbar = fig.colorbar(sm, ax=[ax1, ax2], label='Confidence',
+                            pad=0.02, ticks=[0.2, 0.5, 0.7, 0.85, 0.95])
+        cbar.set_ticklabels(['0.0-0.4', '0.4-0.6', '0.6-0.8', '0.8-0.9', '0.9-1.0'])
 
     # Add legend to the first subplot
     handles1, labels1 = ax1.get_legend_handles_labels()
