@@ -29,7 +29,7 @@ class RadarTracker:
     def __init__(self,
                  max_age: int = 5,
                  min_hits: int = 3,
-                 iou_threshold: float = 5.0,  # Distance threshold in meters
+                 max_velocity_ms: float = 50.0, # Maximum velocity for association (m/s)
                  dt: float = 0.1,  # Default time step for predictions
                  base_dt: float = 0.1,
                  max_dt_gap: float = 1.0,
@@ -53,6 +53,8 @@ class RadarTracker:
                  chi2_threshold_99: float = 9.210,
                  chi2_threshold_99_9: float = 13.816,
                  default_chi2_threshold: float = 5.991,
+                 # Evaluation parameters
+                 max_distance_threshold: float = 10.0,  # For evaluation purposes
                  ):
         """
         Initialize radar tracker with timestamp support.
@@ -60,7 +62,7 @@ class RadarTracker:
         Args:
             max_age: Maximum frames to keep track alive without detections
             min_hits: Minimum detections before track is considered confirmed
-            iou_threshold: Maximum distance for association (meters)
+            max_velocity_ms: Maximum expected velocity in m/s
             min_confidence_init: Minimum confidence required to initiate new track
             min_confidence_assoc: Minimum confidence required for association
             confidence_weight: Weight for confidence in association cost (0.0-1.0)
@@ -76,7 +78,7 @@ class RadarTracker:
         """
         self.max_age = max_age
         self.min_hits = min_hits
-        self.iou_threshold = iou_threshold
+        self.max_velocity_ms = max_velocity_ms
         self.dt = dt
         self.base_dt = base_dt
         self.max_dt_gap = max_dt_gap
@@ -106,6 +108,9 @@ class RadarTracker:
         self.chi2_threshold_99_9 = chi2_threshold_99_9
         self.default_chi2_threshold = default_chi2_threshold
 
+        # Evaluation parameters
+        self.max_distance_threshold = max_distance_threshold
+
         # Validate and set association strategy
         try:
             self.association_strategy = AssociationStrategy(association_strategy)
@@ -115,7 +120,7 @@ class RadarTracker:
 
         # Initialize components
         self.kf = RadarKalmanFilter(base_dt=base_dt)
-        self.metrics = RadarMetrics(max_distance_threshold=iou_threshold)
+        self.metrics = RadarMetrics(max_distance_threshold=self.max_distance_threshold)
 
         # Tracking state
         self.tracks: List[Track] = []
@@ -177,7 +182,7 @@ class RadarTracker:
             self._remove_out_of_range_tracks()
 
         # Associate detections with tracks using high-confidence detections only
-        matches, unmatched_detections, unmatched_tracks = self._associate(high_conf_detections)
+        matches, unmatched_detections, unmatched_tracks = self._associate(high_conf_detections, frame_dt)
 
         # Update matched tracks
         for track_idx, det_idx in matches:
@@ -397,14 +402,14 @@ class RadarTracker:
 
         self.tracks = tracks_to_keep
 
-    def _associate(self, detections: List[Detection]) -> Tuple[List[Tuple[int, int]],
-    List[int],
-    List[int]]:
+    def _associate(self, detections: List[Detection], dt: float) -> Tuple[List[Tuple[int, int]], List[int], List[int]]:
         """
         Associate detections with existing tracks using Hungarian algorithm.
+        Updated to use dynamic distance threshold.
 
         Args:
             detections: List of detections to associate
+            dt: Time step for this frame (used for dynamic thresholding)
 
         Returns:
             Tuple of (matches, unmatched_detections, unmatched_tracks)
@@ -412,8 +417,11 @@ class RadarTracker:
         if not self.tracks or not detections:
             return [], list(range(len(detections))), list(range(len(self.tracks)))
 
+        # Calculate dynamic distance threshold
+        distance_threshold = self.max_velocity_ms * dt
+
         # Create cost matrix using selected strategy
-        cost_matrix = self._create_cost_matrix(detections)
+        cost_matrix = self._create_cost_matrix(detections, distance_threshold)
 
         if cost_matrix.size > 0:
             # Apply Hungarian algorithm
@@ -422,7 +430,7 @@ class RadarTracker:
             # Filter matches by distance threshold and confidence requirements
             matches = []
             for t_idx, d_idx in zip(track_indices, det_indices):
-                if self._is_valid_association(cost_matrix[t_idx, d_idx], detections[d_idx]):
+                if self._is_valid_association(cost_matrix[t_idx, d_idx], detections[d_idx], distance_threshold):
                     matches.append((t_idx, d_idx))
 
             # Find unmatched tracks and detections
@@ -441,12 +449,14 @@ class RadarTracker:
 
         return matches, unmatched_detections, unmatched_tracks
 
-    def _create_cost_matrix(self, detections: List[Detection]) -> np.ndarray:
+    def _create_cost_matrix(self, detections: List[Detection], distance_threshold: float) -> np.ndarray:
         """
         Create cost matrix using the selected association strategy.
+        Updated to use dynamic distance threshold.
 
         Args:
             detections: List of detections to associate
+            distance_threshold: Dynamic distance threshold for this frame
 
         Returns:
             Cost matrix for Hungarian algorithm
@@ -477,47 +487,24 @@ class RadarTracker:
                         cost_matrix[t, d] = distance
 
                 elif self.association_strategy == AssociationStrategy.MAHALANOBIS_DISTANCE:
-                    try:
-                        # Use PREDICTED state and covariance for Mahalanobis distance
-                        pred_state = track.predicted_state if track.predicted_state is not None else track.state
-                        pred_covariance = track.predicted_covariance if track.predicted_covariance is not None else track.covariance
+                    # Use PREDICTED state and covariance for Mahalanobis distance
+                    pred_state = track.predicted_state if track.predicted_state is not None else track.state
+                    pred_covariance = track.predicted_covariance if track.predicted_covariance is not None else track.covariance
 
-                        # Calculate Mahalanobis distance using prediction
-                        mahal_dist = self.kf.gating_distance(
-                            pred_state, pred_covariance, det_pos
-                        )
+                    # Calculate Mahalanobis distance using prediction
+                    mahal_dist = self.kf.gating_distance(
+                        pred_state, pred_covariance, det_pos
+                    )
+                    cost_matrix[t, d] = mahal_dist
 
-                        # Apply gating first - reject if outside threshold
-                        if mahal_dist <= self.default_chi2_threshold:
-                            # Use Mahalanobis distance as cost for valid associations
-                            # # Optionally weight by confidence
-                            # if detection.confidence >= self.min_confidence_assoc:
-                            #     confidence_penalty = (1.0 - detection.confidence) * 0.5
-                            cost_matrix[t, d] = mahal_dist # + confidence_penalty
-                            # else:
-                            #     cost_matrix[t, d] = LARGE_COST  # Reject low confidence
-                        else:
-                            # Reject - set infinite cost
-                            cost_matrix[t, d] = self.LARGE_COST
-
-                    except Exception as e:
-                        print(f"Mahalanobis calculation failed for track {track.id}: {e}")
-                        # Fallback to Euclidean distance
-                        if distance <= self.iou_threshold and detection.confidence >= self.min_confidence_assoc:
-                            cost_matrix[t, d] = distance
-                        else:
-                            cost_matrix[t, d] = self.LARGE_COST
 
                 elif self.association_strategy == AssociationStrategy.HYBRID_SCORE:
                     # Combine distance, confidence, and track quality
-                    try:
-                        mahal_dist = self.kf.gating_distance(
-                            track.state, track.covariance, det_pos
-                        )
-                        # Normalize Mahalanobis distance
-                        mahal_norm = min(mahal_dist / 10.0, 3.0)
-                    except:
-                        mahal_norm = 1.0
+                    mahal_dist = self.kf.gating_distance(
+                        track.state, track.covariance, det_pos
+                    )
+                    # Normalize Mahalanobis distance
+                    mahal_norm = min(mahal_dist / 10.0, 3.0)
 
                     # Track quality score (higher is better)
                     track_quality = min(track.hits / max(track.age, 1), 1.0)
@@ -526,7 +513,7 @@ class RadarTracker:
                     conf_score = detection.confidence
 
                     # Combined cost (lower is better)
-                    distance_cost = distance / self.iou_threshold  # Normalize distance
+                    distance_cost = distance / distance_threshold  # Normalize distance
                     confidence_cost = (1.0 - conf_score) * 2.0  # Penalty for low confidence
                     mahal_cost = mahal_norm * 0.5  # Mahalanobis component
                     track_bonus = (1.0 - track_quality) * 0.5  # Penalty for poor tracks
@@ -535,13 +522,15 @@ class RadarTracker:
 
         return cost_matrix
 
-    def _is_valid_association(self, cost: float, detection: Detection) -> bool:
+    def _is_valid_association(self, cost: float, detection: Detection, distance_threshold: float) -> bool:
         """
         Check if an association is valid based on cost and confidence.
+        Updated to use dynamic distance threshold.
 
         Args:
             cost: Association cost from cost matrix
             detection: Detection being associated
+            distance_threshold: Dynamic distance threshold for this frame
 
         Returns:
             True if association is valid
@@ -550,9 +539,13 @@ class RadarTracker:
         if cost == self.LARGE_COST:
             return False
 
+        # If detection confidence is too low, reject association
+        if detection.confidence < self.min_confidence_assoc:
+            return False
+
         # For Mahalanobis, finite cost means it passed gating
         if self.association_strategy == AssociationStrategy.MAHALANOBIS_DISTANCE:
-            return True  # Already validated in cost matrix creation
+            return cost <= self.default_chi2_threshold
 
         # Basic distance check
         if self.association_strategy == AssociationStrategy.HYBRID_SCORE:
@@ -560,7 +553,7 @@ class RadarTracker:
             return cost <= 2.0  # Adjusted threshold for hybrid scoring
         else:
             # For other strategies, use distance threshold
-            return cost <= self.iou_threshold
+            return cost <= distance_threshold
 
     def _update_track(self, track: Track, detection: Detection, dt: float = None) -> Track:
         """
@@ -680,7 +673,7 @@ class RadarTracker:
         return {
             'max_age': self.max_age,
             'min_hits': self.min_hits,
-            'iou_threshold': self.iou_threshold,
+            'max_velocity_ms': self.max_velocity_ms,
             'dt': self.dt,
             'min_confidence_init': self.min_confidence_init,
             'min_confidence_assoc': self.min_confidence_assoc,
