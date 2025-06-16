@@ -27,14 +27,24 @@ def setup_tracking_system():
     tracker_config = {
         'max_age': 3,
         'min_hits': 3,
-        'iou_threshold': 5.0,
-        'dt': 0.1,
+        'max_velocity_ms': 83.3,  # 300 km/h = 83.3 m/s
+        'base_dt': 0.2,  # 200ms base time step
+        'max_dt_gap': 1.0,  # Trigger multi-step prediction for gaps > 1.0s
+        'max_time_without_update': 2.0,  # Kill tracks after 2 seconds
+        'max_frame_gap_time': 5.0,       # Kill all tracks if frame gap > 5 seconds
 
         # Confidence-based parameters
-        'min_confidence_init': 0.7,
-        'min_confidence_assoc': 0.4,
+        'min_confidence_init': 0.5,
+        'min_confidence_assoc': 0.2,
         'confidence_weight': 0.3,
-        'association_strategy': 'confidence_weighted',
+        'association_strategy': 'confidence_weighted', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
+
+        # Mahalanobis distance parameters
+        'use_mahalanobis': True,
+        'chi2_threshold_95': 5.991,    # 95% confidence for 2 DOF
+        'chi2_threshold_99': 9.210,    # 99% confidence for 2 DOF
+        'chi2_threshold_99_9': 13.816, # 99.9% confidence for 2 DOF
+        'default_chi2_threshold': 5.991,  # Use 95% as default
 
         # Range culling parameters - configured for your radar
         'enable_range_culling': True,
@@ -42,7 +52,10 @@ def setup_tracking_system():
         'min_azimuth_deg': -90.0,  # Your radar's azimuth limits
         'max_azimuth_deg': 90.0,
         'range_buffer': 10.0,  # 10m buffer to avoid killing tracks just outside
-        'azimuth_buffer_deg': 5.0  # 5° buffer for azimuth
+        'azimuth_buffer_deg': 5.0,  # 5° buffer for azimuth
+
+        # Evaluation parameters
+        'max_distance_threshold': 5.0,  # Distance threshold for valid associations
     }
     manager = TrackletManager(tracker_config=tracker_config)
     return manager, tracker_config
@@ -435,7 +448,7 @@ def offline_tracking(
     # ===== ENHANCED EVALUATION METRICS =====
     print("\nRunning comprehensive tracking evaluation...")
 
-    evaluator = TrackingEvaluator(distance_threshold=config.get('iou_threshold', 5.0))
+    evaluator = TrackingEvaluator(distance_threshold=config.get('max_distance_threshold', 5.0))
 
     # Evaluate frame by frame
     for frame_id in all_frames:
@@ -535,7 +548,7 @@ if __name__ == "__main__":
     custom_tracker_config = {
         'max_age': 3,
         'min_hits': 3,
-        'iou_threshold': 83.3 * 0.1, # 300 km/h = 83.3 m/s,
+        'max_velocity_ms': 83.3,  # 300 km/h = 83.3 m/s
         'base_dt': 0.2,  # 200ms base time step
         'max_dt_gap': 1.0,  # Trigger multi-step prediction for gaps > 1.0s
         'max_time_without_update': 2.0,  # Kill tracks after 2 seconds
@@ -560,7 +573,10 @@ if __name__ == "__main__":
         'min_azimuth_deg': -90.0,  # Your radar's azimuth limits
         'max_azimuth_deg': 90.0,
         'range_buffer': 10.0,  # 10m buffer to avoid killing tracks just outside
-        'azimuth_buffer_deg': 5.0  # 5° buffer for azimuth
+        'azimuth_buffer_deg': 5.0,  # 5° buffer for azimuth
+
+        # Evaluation parameters
+        'max_distance_threshold': 5.0,  # Distance threshold for valid associations
     }
 
     args = {
