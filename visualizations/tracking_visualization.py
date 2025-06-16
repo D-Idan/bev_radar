@@ -564,11 +564,11 @@ def create_tracking_video(data_dir: Path, output_dir: Path, labels_csv: str,
     try:
         import subprocess
         cmd = [
-            'ffmpeg', '-y', '-framerate', '5',
-            '-i', str(frames_dir / 'frame_%06d.png'),
-            '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-            '-crf', '18',  # Higher quality
-            str(video_path)
+            "ffmpeg", "-y", "-framerate", "5",
+            "-i", str(frames_dir / "frame_%06d.png"),
+            "-vf", "scale=iw-mod(iw\\,2):ih-mod(ih\\,2)",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-crf", "18", str(video_path)
         ]
         subprocess.run(cmd, check=True, capture_output=True)
         print(f"Enhanced video created: {video_path}")
@@ -578,6 +578,8 @@ def create_tracking_video(data_dir: Path, output_dir: Path, labels_csv: str,
             frame.unlink()
         frames_dir.rmdir()
 
+    # except subprocess.CalledProcessError as e:
+    #     print("Error:", e.stderr)
     except (subprocess.CalledProcessError, FileNotFoundError):
         print(f"FFmpeg not available. Enhanced frame images saved in: {frames_dir}")
         video_path = frames_dir
