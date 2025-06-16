@@ -217,10 +217,10 @@ def visualize_frame_radar_azimuth(
     display_max_azimuth = max_azimuth + azimuth_buffer
     display_max_range = max_range + range_buffer
 
-    ax1.set_xlim(display_min_azimuth, display_max_azimuth)
+    ax1.set_xlim(display_max_azimuth, display_min_azimuth)
     ax1.set_ylim(0, display_max_range)
 
-    ax2.set_xlim(zoom_min_az, zoom_max_az)
+    ax2.set_xlim(zoom_max_az, zoom_min_az)
     ax2.set_ylim(zoom_min_range, zoom_max_range)
 
     # Add grids
