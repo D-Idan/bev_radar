@@ -14,7 +14,7 @@ from visualizations.track_viz import (
     visualize_tracklet_lifetime_histogram,
     visualize_avg_confidence_over_time,
     visualize_all_frames_3d_overview,
-    visualize_tracking_temporal_evolution, visualize_timing_analysis, visualize_tracking_during_gaps
+    visualize_tracking_temporal_evolution, visualize_timing_analysis
 )
 from visualizations.tracking_visualization import create_tracking_video
 from visualizations.visualize_timing import plot_timing_analysis, plot_detailed_timing_analysis
@@ -411,16 +411,6 @@ def offline_tracking(
         frame_times=frame_times,
         time_gaps=time_gaps,
         output_dir=str(output_paths['summary_plots'])
-    )
-
-    # Visualize tracking during gaps
-    gap_threshold = np.percentile(time_gaps, 90) if time_gaps else 0.5  # Top 10% gaps
-    visualize_tracking_during_gaps(
-        all_tracks=all_tracks,
-        frame_times=frame_times,
-        gap_threshold=gap_threshold,
-        output_dir=str(output_paths['summary_plots']),
-        radar_config=config
     )
 
     # Visualize timing analysis
