@@ -31,7 +31,7 @@ class RadarKalmanFilter:
 
         # Default config
         default_config = {
-            'process_noise_q_std': 1.0,  # Reduced from 10.0
+            'process_noise_q_std': 1.0,  # Reduced from 3.0
             'measurement_noise_std': 0.5,  # Keep current
             'initial_pos_std': 2.0,  # Reduced from ~7m
             'initial_vel_std': 5.0,  # Reduced from ~7m/s

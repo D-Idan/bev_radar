@@ -559,8 +559,8 @@ if __name__ == "__main__":
         'max_velocity_ms': 83.3,  # 300 km/h = 83.3 m/s
         'base_dt': 0.2,  # 200ms base time step
         'max_dt_gap': 1.0,  # Trigger multi-step prediction for gaps > 1.0s
-        'max_time_without_update': 2.0,  # Kill tracks after 2 seconds
-        'max_frame_gap_time': 3.0,       # Kill all tracks if frame gap > 3 seconds
+        'max_time_without_update': 1.0,  # Kill tracks after 1 seconds
+        'max_frame_gap_time': 2.0,       # Kill all tracks if frame gap > 2 seconds
 
         # Confidence-based parameters
         'min_confidence_init': 0.5,
@@ -573,7 +573,7 @@ if __name__ == "__main__":
         'chi2_threshold_95': 5.991,    # 95% confidence for 2 DOF
         'chi2_threshold_99': 9.210,    # 99% confidence for 2 DOF
         'chi2_threshold_99_9': 13.816, # 99.9% confidence for 2 DOF
-        'default_chi2_threshold': 5.991,  # Use 95% as default
+        'default_chi2_threshold': 4.605,  # Use 90% as default
 
         # Range culling parameters - configured for your radar
         'enable_range_culling': True,

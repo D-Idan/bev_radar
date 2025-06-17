@@ -655,7 +655,7 @@ class RadarTracker:
     def _remove_dead_tracks(self):
         """Remove tracks that have been inactive for too long."""
         self.tracks = [track for track in self.tracks
-                       if track.time_since_update < self.max_age]
+                       if track.time_since_update < self.max_age] # consecutive frames without detection association
 
     def _get_confirmed_tracks(self) -> List[Track]:
         """
