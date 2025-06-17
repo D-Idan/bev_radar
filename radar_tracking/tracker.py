@@ -26,100 +26,110 @@ class RadarTracker:
     SORT-like tracker for radar objects using Kalman filtering and Hungarian assignment.
     """
 
-    def __init__(self,
-                 max_age: int = 5,
-                 min_hits: int = 3,
-                 max_velocity_ms: float = 50.0, # Maximum velocity for association (m/s)
-                 dt: float = 0.1,  # Default time step for predictions
-                 base_dt: float = 0.1,
-                 max_dt_gap: float = 1.0,
-                 # Confidence-based parameters
-                 min_confidence_init: float = 0.5,
-                 min_confidence_assoc: float = 0.3,
-                 confidence_weight: float = 0.3,
-                 association_strategy: str = "confidence_weighted",
-                 # Range culling parameters
-                 enable_range_culling: bool = True,
-                 max_range: float = 103.0,
-                 min_azimuth_deg: float = -90.0,
-                 max_azimuth_deg: float = 90.0,
-                 range_buffer: float = 10.0,
-                 azimuth_buffer_deg: float = 5.0,
-                 max_time_without_update: float = 2.0,  # Kill track after 2s without update
-                 max_frame_gap_time: float = 5.0,  # Kill all tracks if gap > 5s
-                 # Mahalanobis distance parameters
-                 use_mahalanobis: bool = False,
-                 chi2_threshold_95: float = 5.991,
-                 chi2_threshold_99: float = 9.210,
-                 chi2_threshold_99_9: float = 13.816,
-                 default_chi2_threshold: float = 5.991,
-                 # Evaluation parameters
-                 max_distance_threshold: float = 10.0,  # For evaluation purposes
-                 ):
+    def __init__(self, radar_config=None, **kwargs):
         """
         Initialize radar tracker with timestamp support.
 
         Args:
-            max_age: Maximum frames to keep track alive without detections
-            min_hits: Minimum detections before track is considered confirmed
-            max_velocity_ms: Maximum expected velocity in m/s
-            min_confidence_init: Minimum confidence required to initiate new track
-            min_confidence_assoc: Minimum confidence required for association
-            confidence_weight: Weight for confidence in association cost (0.0-1.0)
-            association_strategy: Strategy for association
-            enable_range_culling: Whether to remove tracks outside radar coverage
-            max_range: Maximum radar range (meters)
-            min_azimuth_deg: Minimum azimuth coverage (degrees)
-            max_azimuth_deg: Maximum azimuth coverage (degrees)
-            range_buffer: Buffer zone for range culling (meters)
-            azimuth_buffer_deg: Buffer zone for azimuth culling (degrees)
-            base_dt: Base time step for regular predictions (seconds)
-            max_dt_gap: Maximum time gap before multi-step prediction (seconds)
+            radar_config: Dictionary containing radar tracker configuration parameters
+            **kwargs: Additional parameters that override radar_config values
         """
-        self.max_age = max_age
-        self.min_hits = min_hits
-        self.max_velocity_ms = max_velocity_ms
-        self.dt = dt
-        self.base_dt = base_dt
-        self.max_dt_gap = max_dt_gap
+        # Default configuration
+        default_config = {
+        'max_age': 3,
+        'min_hits': 3,
+        'max_velocity_ms': 83.3,  # 300 km/h = 83.3 m/s
+        'base_dt': 0.2,  # 200ms base time step
+        'max_dt_gap': 1.0,  # Trigger multi-step prediction for gaps > 1.0s
+        'max_time_without_update': 2.0,  # Kill tracks after 2 seconds
+        'max_frame_gap_time': 3.0,       # Kill all tracks if frame gap > 3 seconds
+
+        # Confidence-based parameters
+        'min_confidence_init': 0.5,
+        'min_confidence_assoc': 0.2,
+        'confidence_weight': 0.3,
+        'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
+
+        # Mahalanobis distance parameters
+        'use_mahalanobis': True,
+        'chi2_threshold_95': 5.991,    # 95% confidence for 2 DOF
+        'chi2_threshold_99': 9.210,    # 99% confidence for 2 DOF
+        'chi2_threshold_99_9': 13.816, # 99.9% confidence for 2 DOF
+        'default_chi2_threshold': 5.991,  # Use 95% as default
+
+        # Range culling parameters - configured for your radar
+        'enable_range_culling': True,
+        'max_range': 103.0,  # Your radar's max range
+        'min_azimuth_deg': -90.0,  # Your radar's azimuth limits
+        'max_azimuth_deg': 90.0,
+        'range_buffer': 10.0,  # 10m buffer to avoid killing tracks just outside
+        'azimuth_buffer_deg': 5.0,  # 5° buffer for azimuth
+
+        # Kalman Filter Parameters
+        'kalman_config': {
+            'process_noise_q_std': 1.0,  # Reduced from default 3.0
+            'measurement_noise_std': 0.5,  # Radar accuracy (meters) std
+            'initial_pos_std': 2.0,  # Initial position uncertainty
+            'initial_vel_std': 5.0,  # Initial velocity uncertainty
+        },
+
+        # Evaluation parameters
+        'max_distance_threshold': 2.0,  # Distance threshold for valid associations
+    }
+
+        # Merge configurations: default_config <- radar_config <- kwargs
+        config = default_config.copy()
+        if radar_config:
+            config.update(radar_config)
+        config.update(kwargs)
+
+        # Set instance attributes
+        self.max_age = config['max_age']
+        self.min_hits = config['min_hits']
+        self.max_velocity_ms = config['max_velocity_ms']
+        self.base_dt = config['base_dt']
+        self.max_dt_gap = config['max_dt_gap']
         self.prediction_history = {}  # Track ID -> list of predictions
-        self.gap_predictions = {}     # Track ID -> predictions during gaps
-        self.max_time_without_update = max_time_without_update
-        self.max_frame_gap_time = max_frame_gap_time
+        self.gap_predictions = {}  # Track ID -> predictions during gaps
+        self.max_time_without_update = config['max_time_without_update']
+        self.max_frame_gap_time = config['max_frame_gap_time']
         self.track_last_update_times = {}  # Track ID -> last update timestamp
 
         # Confidence-based parameters
-        self.min_confidence_init = min_confidence_init
-        self.min_confidence_assoc = min_confidence_assoc
-        self.confidence_weight = confidence_weight
+        self.min_confidence_init = config['min_confidence_init']
+        self.min_confidence_assoc = config['min_confidence_assoc']
+        self.confidence_weight = config['confidence_weight']
+        association_strategy = config['association_strategy']
 
         # Range culling parameters
-        self.enable_range_culling = enable_range_culling
-        self.max_range = max_range
-        self.min_azimuth_deg = min_azimuth_deg
-        self.max_azimuth_deg = max_azimuth_deg
-        self.range_buffer = range_buffer
-        self.azimuth_buffer_deg = azimuth_buffer_deg
+        self.enable_range_culling = config['enable_range_culling']
+        self.max_range = config['max_range']
+        self.min_azimuth_deg = config['min_azimuth_deg']
+        self.max_azimuth_deg = config['max_azimuth_deg']
+        self.range_buffer = config['range_buffer']
+        self.azimuth_buffer_deg = config['azimuth_buffer_deg']
 
         # Mahalanobis parameters
-        self.use_mahalanobis = use_mahalanobis
-        self.chi2_threshold_95 = chi2_threshold_95
-        self.chi2_threshold_99 = chi2_threshold_99
-        self.chi2_threshold_99_9 = chi2_threshold_99_9
-        self.default_chi2_threshold = default_chi2_threshold
+        self.use_mahalanobis = config['use_mahalanobis']
+        self.chi2_threshold_95 = config['chi2_threshold_95']
+        self.chi2_threshold_99 = config['chi2_threshold_99']
+        self.chi2_threshold_99_9 = config['chi2_threshold_99_9']
+        self.default_chi2_threshold = config['default_chi2_threshold']
+
+        # Kalman Filter parameters
+        kalman_config = config['kalman_config']
 
         # Evaluation parameters
-        self.max_distance_threshold = max_distance_threshold
+        self.max_distance_threshold = config['max_distance_threshold']
 
         # Validate and set association strategy
-        try:
-            self.association_strategy = AssociationStrategy(association_strategy)
-        except ValueError:
-            print(f"Warning: Unknown association strategy '{association_strategy}', using 'confidence_weighted'")
-            self.association_strategy = AssociationStrategy.CONFIDENCE_WEIGHTED
+        self.association_strategy = AssociationStrategy(association_strategy)
 
         # Initialize components
-        self.kf = RadarKalmanFilter(base_dt=base_dt)
+        self.kf = RadarKalmanFilter(
+            base_dt=self.base_dt,
+            config=kalman_config,
+        )
         self.metrics = RadarMetrics(max_distance_threshold=self.max_distance_threshold)
 
         # Tracking state
@@ -163,7 +173,7 @@ class RadarTracker:
             frame_dt = dt
         else:
             # Fall back to configured dt
-            frame_dt = self.dt
+            frame_dt = self.base_dt
 
         # Filter detections by confidence for association
         high_conf_detections = [det for det in detections
@@ -562,14 +572,14 @@ class RadarTracker:
         Args:
             track: Track to update
             detection: Detection to use for update
-            dt: Time step for this update (if None, uses self.dt)
+            dt: Time step for this update (if None, uses self.base_dt)
 
         Returns:
             Updated track
         """
         # Use provided dt or fall back to tracker's dt
         if dt is None:
-            dt = self.dt
+            dt = self.base_dt
 
         # Use the already-computed prediction state.
         pred_state = track.predicted_state
@@ -674,7 +684,7 @@ class RadarTracker:
             'max_age': self.max_age,
             'min_hits': self.min_hits,
             'max_velocity_ms': self.max_velocity_ms,
-            'dt': self.dt,
+            'dt': self.base_dt,
             'min_confidence_init': self.min_confidence_init,
             'min_confidence_assoc': self.min_confidence_assoc,
             'confidence_weight': self.confidence_weight,

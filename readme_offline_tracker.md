@@ -107,3 +107,62 @@ the radar platform is moving (driving car)
 - Using the standard Mahalanobis (without considering confidence) avoids the track swap; however, an extra false track is initiated and then closed.
 **Additional Note:**
 - Some measurements have low confidence. We plan to develop a new cost function that incorporates both the Mahalanobis distance and confidence—possibly using an adaptive R in the Kalman filter.
+
+## Kalman Filter Parameter Summary for Thesis
+
+### Process Noise (q)
+#### Vehicle acceleration scenarios:
+- gentle_accel = 1.0   # m/s² (normal driving)
+- moderate_accel = 3.0 # m/s² (assertive driving) 
+- hard_accel = 6.0     # m/s² (aggressive driving)
+- emergency = 10.0     # m/s² (emergency braking)
+
+#### For Different Vehicle Types:
+###### Highway vehicles (smooth motion): 
+q_highway = 1.0      # σ_a = 1.0 m/s²
+
+###### City vehicles (frequent stops/starts):  
+q_city = 4.0         # σ_a = 2.0 m/s²
+
+###### Off-road vehicles (erratic motion):
+q_offroad = 9.0      # σ_a = 3.0 m/s²
+
+###### Emergency vehicles (unpredictable):
+q_emergency = 16.0   # σ_a = 4.0 m/s²
+
+```python
+q = 1.0 to 4.0  # (m²/s⁴)
+# Rationale: σ_acceleration = √q = 1-2 m/s²
+# Represents typical vehicle acceleration variations
+# Lower = smoother tracking, Higher = more responsive to maneuvers
+```
+
+### Measurement Noise (R)
+```python
+R = diag([0.25, 0.25])  # std = 0.5m
+# Rationale: Typical automotive radar accuracy ±0.5m
+# Diagonal matrix assumes x,y measurement errors are independent
+```
+
+### Initial Position Uncertainty
+```python
+P_init_pos = 4.0  # (2m std dev)
+# Rationale: Conservative estimate for first radar detection accuracy
+# Not too confident (allows quick adaptation) but not too uncertain
+```
+
+### Initial Velocity Uncertainty  
+```python
+P_init_vel = 25.0  # (5m/s std dev)
+# Rationale: Complete uncertainty in initial velocity (start from zero)
+# Allows filter to learn actual velocity from subsequent detections
+```
+
+### Chi-Square Gating Threshold
+```python
+chi2_95 = 5.991  # 95% confidence for 2 DOF
+# Rationale: Balance between accepting valid associations and rejecting false alarms
+# Corresponds to ~2.5σ spatial gate for typical radar accuracy
+```
+
+**Key Design Principle**: Parameters reflect **physical constraints** of vehicle dynamics and **sensor characteristics** of automotive radar, tuned for **highway/urban driving scenarios**.

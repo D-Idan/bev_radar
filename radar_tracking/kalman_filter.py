@@ -17,31 +17,43 @@ class RadarKalmanFilter:
     Measurement vector: [x, y] (position only)
     """
 
-    def __init__(self, base_dt: float = 0.1):
+    def __init__(self, base_dt: float = 0.1, config: dict = None):
         """
         Initialize Kalman filter.
 
         Args:
             base_dt: Base time step for process noise tuning (seconds)
+            config: Optional configuration dictionary
         """
         self.base_dt = base_dt
         self.dim_x = 4  # State dimension: [x, y, vx, vy]
         self.dim_z = 2  # Measurement dimension: [x, y]
+
+        # Default config
+        default_config = {
+            'process_noise_q_std': 1.0,  # Reduced from 10.0
+            'measurement_noise_std': 0.5,  # Keep current
+            'initial_pos_std': 2.0,  # Reduced from ~7m
+            'initial_vel_std': 5.0,  # Reduced from ~7m/s
+        }
+
+        # Merge with provided config
+        self.config = {**default_config, **(config or {})}
+
+        # Set parameters from config
+        self.q = self.config['process_noise_q_std'] ** 2
+        self.R = np.eye(2) * (self.config['measurement_noise_std'] ** 2)
+
+        # Different uncertainties for position and velocity
+        pos_var = self.config['initial_pos_std'] ** 2
+        vel_var = self.config['initial_vel_std'] ** 2
+        self.P_init = np.diag([pos_var, pos_var, vel_var, vel_var])
 
         # Measurement matrix (observe position only)
         self.H = np.array([
             [1, 0, 0, 0],
             [0, 1, 0, 0]
         ])
-
-        # Base process noise magnitude
-        self.q = 10.0  # Adjust based on expected acceleration
-
-        # Measurement noise covariance matrix
-        self.R = np.eye(2) * 0.5  # 0.5 meter standard deviation
-
-        # Initial state covariance matrix
-        self.P_init = np.eye(4) * 50.0
 
     def _get_F_matrix(self, dt: float) -> np.ndarray:
         """Get state transition matrix for given time step."""

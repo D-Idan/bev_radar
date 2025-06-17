@@ -37,7 +37,7 @@ def setup_tracking_system():
         'min_confidence_init': 0.5,
         'min_confidence_assoc': 0.2,
         'confidence_weight': 0.3,
-        'association_strategy': 'confidence_weighted', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
+        'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
 
         # Mahalanobis distance parameters
         'use_mahalanobis': True,
@@ -53,6 +53,14 @@ def setup_tracking_system():
         'max_azimuth_deg': 90.0,
         'range_buffer': 10.0,  # 10m buffer to avoid killing tracks just outside
         'azimuth_buffer_deg': 5.0,  # 5° buffer for azimuth
+
+        # Kalman Filter Parameters
+        'kalman_config': {
+            'process_noise_q_std': 1.0,  # Reduced from default 3.0
+            'measurement_noise_std': 0.5,  # Radar accuracy (meters)
+            'initial_pos_std': 2.0,  # Initial position uncertainty
+            'initial_vel_std': 5.0,  # Initial velocity uncertainty
+        },
 
         # Evaluation parameters
         'max_distance_threshold': 5.0,  # Distance threshold for valid associations
@@ -552,13 +560,13 @@ if __name__ == "__main__":
         'base_dt': 0.2,  # 200ms base time step
         'max_dt_gap': 1.0,  # Trigger multi-step prediction for gaps > 1.0s
         'max_time_without_update': 2.0,  # Kill tracks after 2 seconds
-        'max_frame_gap_time': 5.0,       # Kill all tracks if frame gap > 5 seconds
+        'max_frame_gap_time': 3.0,       # Kill all tracks if frame gap > 3 seconds
 
         # Confidence-based parameters
         'min_confidence_init': 0.5,
         'min_confidence_assoc': 0.2,
         'confidence_weight': 0.3,
-        'association_strategy': 'confidence_weighted', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
+        'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
 
         # Mahalanobis distance parameters
         'use_mahalanobis': True,
@@ -575,8 +583,16 @@ if __name__ == "__main__":
         'range_buffer': 10.0,  # 10m buffer to avoid killing tracks just outside
         'azimuth_buffer_deg': 5.0,  # 5° buffer for azimuth
 
+        # Kalman Filter Parameters
+        'kalman_config': {
+            'process_noise_q_std': 1.0,  # Reduced from default 3.0
+            'measurement_noise_std': 0.5,  # Radar accuracy (meters) std
+            'initial_pos_std': 2.0,  # Initial position uncertainty
+            'initial_vel_std': 5.0,  # Initial velocity uncertainty
+        },
+
         # Evaluation parameters
-        'max_distance_threshold': 5.0,  # Distance threshold for valid associations
+        'max_distance_threshold': 2.0,  # Distance threshold for valid associations
     }
 
     args = {
