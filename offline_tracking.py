@@ -573,7 +573,7 @@ if __name__ == "__main__":
         'chi2_threshold_95': 5.991,    # 95% confidence for 2 DOF
         'chi2_threshold_99': 9.210,    # 99% confidence for 2 DOF
         'chi2_threshold_99_9': 13.816, # 99.9% confidence for 2 DOF
-        'default_chi2_threshold': 4.605,  # Use 90% as default
+        'default_chi2_threshold': 5.991, #4.605,  # Use 90% as default
 
         # Range culling parameters - configured for your radar
         'enable_range_culling': True,

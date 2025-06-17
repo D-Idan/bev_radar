@@ -163,43 +163,57 @@ def visualize_frame_radar_azimuth(
                            label='Prediction' if i == 0 else "")
 
             # Draw multiple threshold ellipses if enabled
-            if show_confidence_ellipses and hasattr(track, 'covariance'):
+            if show_confidence_ellipses:
+                # Determine ellipse center and covariance to use
+                ellipse_center = None
+                ellipse_covariance = None
 
-                # Chi-square 95% ellipse (solid red)
-                ellipse_95 = create_chi2_confidence_ellipse_polar(
-                    track.position, track.covariance[:2, :2], chi2_95,
-                    color='red', alpha=0.15, linestyle='-', linewidth=1
-                )
-                if ellipse_95:
-                    ax.add_patch(ellipse_95)
-                    if not has_chi2_95:
-                        ax.scatter([], [], c='red', alpha=0.15, s=80, marker='o',
-                                   label=f'χ² 95% ({chi2_95:.1f})')
-                        has_chi2_95 = True
+                # Prefer prediction state and covariance if available
+                if (hasattr(track, 'predicted_state') and track.predicted_state is not None and
+                        hasattr(track, 'predicted_covariance') and track.predicted_covariance is not None):
+                    ellipse_center = track.predicted_state[:2]  # [x, y]
+                    ellipse_covariance = track.predicted_covariance[:2, :2]  # 2x2 position covariance
+                elif hasattr(track, 'covariance') and track.covariance is not None:
+                    # Fallback to current position and covariance
+                    ellipse_center = track.position
+                    ellipse_covariance = track.covariance[:2, :2]
 
-                # Chi-square 99% ellipse (dashed orange)
-                ellipse_99 = create_chi2_confidence_ellipse_polar(
-                    track.position, track.covariance[:2, :2], chi2_99,
-                    color='orange', alpha=0.12, linestyle='--', linewidth=1.5
-                )
-                if ellipse_99:
-                    ax.add_patch(ellipse_99)
-                    if not has_chi2_99:
-                        ax.scatter([], [], c='orange', alpha=0.12, s=80, marker='s',
-                                   label=f'χ² 99% ({chi2_99:.1f})')
-                        has_chi2_99 = True
+                if ellipse_center is not None and ellipse_covariance is not None:
+                    # Chi-square 95% ellipse (solid red)
+                    ellipse_95 = create_chi2_confidence_ellipse_polar(
+                        ellipse_center, ellipse_covariance, chi2_95,
+                        color='red', alpha=0.15, linestyle='-', linewidth=1
+                    )
+                    if ellipse_95:
+                        ax.add_patch(ellipse_95)
+                        if not has_chi2_95:
+                            ax.scatter([], [], c='red', alpha=0.15, s=80, marker='o',
+                                       label=f'χ² 95% ({chi2_95:.3f})')
+                            has_chi2_95 = True
 
-                # Chi-square 99.9% ellipse (dotted purple)
-                ellipse_99_9 = create_chi2_confidence_ellipse_polar(
-                    track.position, track.covariance[:2, :2], chi2_99_9,
-                    color='purple', alpha=0.1, linestyle=':', linewidth=2
-                )
-                if ellipse_99_9:
-                    ax.add_patch(ellipse_99_9)
-                    if not has_chi2_99_9:
-                        ax.scatter([], [], c='purple', alpha=0.1, s=80, marker='^',
-                                   label=f'χ² 99.9% ({chi2_99_9:.1f})')
-                        has_chi2_99_9 = True
+                    # Chi-square 99% ellipse (dashed orange)
+                    ellipse_99 = create_chi2_confidence_ellipse_polar(
+                        ellipse_center, ellipse_covariance, chi2_99,
+                        color='orange', alpha=0.12, linestyle='--', linewidth=1.5
+                    )
+                    if ellipse_99:
+                        ax.add_patch(ellipse_99)
+                        if not has_chi2_99:
+                            ax.scatter([], [], c='orange', alpha=0.12, s=80, marker='s',
+                                       label=f'χ² 99% ({chi2_99:.3f})')
+                            has_chi2_99 = True
+
+                    # Chi-square 99.9% ellipse (dotted purple)
+                    ellipse_99_9 = create_chi2_confidence_ellipse_polar(
+                        ellipse_center, ellipse_covariance, chi2_99_9,
+                        color='purple', alpha=0.1, linestyle=':', linewidth=2
+                    )
+                    if ellipse_99_9:
+                        ax.add_patch(ellipse_99_9)
+                        if not has_chi2_99_9:
+                            ax.scatter([], [], c='purple', alpha=0.1, s=80, marker='^',
+                                       label=f'χ² 99.9% ({chi2_99_9:.3f})')
+                            has_chi2_99_9 = True
 
         return scatter
 
@@ -233,16 +247,20 @@ def visualize_frame_radar_azimuth(
 
     # Add colorbar for confidence if we have detections
     if detections:
-        from matplotlib.colors import ListedColormap
+        from matplotlib.colors import ListedColormap, BoundaryNorm
+        # Define the actual bin boundaries
+        bin_boundaries = [0, 0.4, 0.6, 0.8, 0.9, 1.0]
         blue_colors = plt.cm.get_cmap('Blues')(np.linspace(0.3, 1.0, 5))
         blue_cmap = ListedColormap(blue_colors)
-        sm = plt.cm.ScalarMappable(cmap=blue_cmap,
-                                   norm=plt.Normalize(vmin=0, vmax=1))
+        # Use BoundaryNorm to map the unequal bins correctly
+        norm = BoundaryNorm(bin_boundaries, blue_cmap.N)
+
+        sm = plt.cm.ScalarMappable(cmap=blue_cmap, norm=norm)
         sm.set_array([])
 
         cbar = fig.colorbar(sm, ax=[ax1, ax2], label='Confidence',
-                            pad=0.02, ticks=[0.2, 0.5, 0.7, 0.85, 0.95])
-        cbar.set_ticklabels(['0.0-0.4', '0.4-0.6', '0.6-0.8', '0.8-0.9', '0.9-1.0'])
+                            pad=0.02, boundaries=bin_boundaries ,ticks=bin_boundaries)
+        cbar.set_ticklabels([str(i) for i in bin_boundaries])
 
     # Add legend to the first subplot
     handles1, labels1 = ax1.get_legend_handles_labels()
