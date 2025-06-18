@@ -18,7 +18,7 @@ from visualizations.track_viz import (
 )
 from visualizations.tracking_visualization import create_tracking_video
 from visualizations.visualize_timing import plot_timing_analysis, plot_detailed_timing_analysis
-from utils.tracking_metrics import TrackingEvaluator
+from utils.metrics.tracking_metrics import TrackingEvaluator
 
 def setup_tracking_system():
     """
