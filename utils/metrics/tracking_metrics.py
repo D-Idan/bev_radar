@@ -555,82 +555,147 @@ class TrackingDetectionEvaluator:
             return
 
         with open(output_path, 'w') as f:
-            f.write("=" * 80 + "\n")
-            f.write("           TRACKING AND DETECTION EVALUATION REPORT\n")
-            f.write("=" * 80 + "\n\n")
+            # Header
+            f.write("═" * 100 + "\n")
+            f.write("                        TRACKING AND DETECTION EVALUATION REPORT\n")
+            f.write("═" * 100 + "\n\n")
 
+            # Executive Summary
             summary = report['evaluation_summary']
-            f.write("📊 EVALUATION SUMMARY:\n")
-            f.write(f"   • Frames Evaluated: {summary['frames_evaluated']}\n")
-            f.write(f"   • Distance Threshold: {summary['distance_threshold_m']:.1f}m\n")
-            f.write(f"   • IoU Threshold: {summary['iou_threshold']:.2f}\n\n")
-
-            # Detection Performance
             det = report['detection_performance']
-            f.write("🎯 DETECTION PERFORMANCE:\n")
-            f.write(f"   • Precision:           {det['precision']:.3f}\n")
-            f.write(f"   • Recall:              {det['recall']:.3f}\n")
-            f.write(f"   • F1-Score:            {det['f1_score']:.3f}\n")
-            f.write(f"   • DetA:                {det['det_a']:.3f}\n")
-            f.write(f"   • Mean Distance:       {det['mean_euclidean_distance_m']:.2f}m\n")
-            f.write(f"   • MOTP:                {det['motp_m']:.2f}m\n")
-            f.write(f"   • Mean IoU:            {det['mean_iou']:.3f}\n")
-            f.write(
-                f"   • TP/FP/FN:            {det['true_positives']}/{det['false_positives']}/{det['false_negatives']}\n\n")
-
-            # Tracking Performance
             track = report['tracking_performance']
-            f.write("🔄 TRACKING PERFORMANCE:\n")
-            f.write(f"   • Precision:           {track['precision']:.3f}\n")
-            f.write(f"   • Recall:              {track['recall']:.3f}\n")
-            f.write(f"   • F1-Score:            {track['f1_score']:.3f}\n")
-            f.write(f"   • DetA:                {track['det_a']:.3f}\n")
-            f.write(f"   • Mean Distance:       {track['mean_euclidean_distance_m']:.2f}m\n")
-            f.write(f"   • MOTP:                {track['motp_m']:.2f}m\n")
-            f.write(f"   • Mean IoU:            {track['mean_iou']:.3f}\n")
-            f.write(
-                f"   • TP/FP/FN:            {track['true_positives']}/{track['false_positives']}/{track['false_negatives']}\n\n")
-
-            # Add Camera IoU Performance section
+            comp = report['performance_comparison']
             camera_iou = report.get('camera_iou_performance', {})
+
+            f.write("📋 EXECUTIVE SUMMARY\n")
+            f.write("─" * 50 + "\n")
+            f.write(
+                f"Frames: {summary['frames_evaluated']:,} | Distance Threshold: {summary['distance_threshold_m']:.1f}m | IoU Threshold: {summary['iou_threshold']:.2f} | Avg GT/Frame: {det['avg_ground_truth_per_frame']:.1f}\n\n")
+
+            # Performance Summary Table
+            f.write("🎯 PERFORMANCE SUMMARY\n")
+            f.write("─" * 50 + "\n")
+            f.write(f"{'Metric':<25} {'Detection':<12} {'Tracking':<12} {'Improvement':<12}\n")
+            f.write("─" * 80 + "\n")
+
+            # Core metrics
+            f.write(
+                f"{'Precision':<25} {det['precision']:<12.4f} {track['precision']:<12.4f} {comp['precision']['improvement_percent']:>+10.1f}%\n")
+            f.write(
+                f"{'Recall':<25} {det['recall']:<12.4f} {track['recall']:<12.4f} {comp['recall']['improvement_percent']:>+10.1f}%\n")
+            f.write(
+                f"{'F1-Score':<25} {det['f1_score']:<12.4f} {track['f1_score']:<12.4f} {comp['f1_score']['improvement_percent']:>+10.1f}%\n")
+            f.write(
+                f"{'DetA':<25} {det['det_a']:<12.4f} {track['det_a']:<12.4f} {comp['det_a']['improvement_percent']:>+10.1f}%\n")
+
+            # Distance metrics
+            det_dist = "N/A" if det['mean_euclidean_distance_m'] == float(
+                'inf') else f"{det['mean_euclidean_distance_m']:.2f}"
+            track_dist = "N/A" if track['mean_euclidean_distance_m'] == float(
+                'inf') else f"{track['mean_euclidean_distance_m']:.2f}"
+            dist_improvement = "N/A" if comp['mean_euclidean_distance_m']['improvement_percent'] == float(
+                'inf') else f"{-comp['mean_euclidean_distance_m']['improvement_percent']:+10.1f}%"
+            f.write(f"{'Mean Distance (m)':<25} {det_dist:<12} {track_dist:<12} {dist_improvement:>11}\n")
+
+            # Camera IoU metrics
             if camera_iou:
                 det_cam_iou = camera_iou.get('detection_camera_iou', {})
                 track_cam_iou = camera_iou.get('tracking_camera_iou', {})
 
-                f.write("📷 CAMERA IMAGE IOU PERFORMANCE:\n")
-                f.write(f"   • Detection Mean IoU:    {det_cam_iou.get('mean', 0.0):.3f}\n")
-                f.write(f"   • Detection Std IoU:     {det_cam_iou.get('std', 0.0):.3f}\n")
-                f.write(f"   • Detection Count:       {det_cam_iou.get('count', 0)}\n")
+                det_cam_mean = det_cam_iou.get('mean', 0.0)
+                track_cam_mean = track_cam_iou.get('mean', 0.0)
+                cam_improvement = "N/A"
+                if det_cam_mean > 0 and track_cam_mean > 0:
+                    cam_improvement = f"{((track_cam_mean - det_cam_mean) / det_cam_mean) * 100:+10.1f}%"
 
+                f.write(f"{'Camera IoU':<25} {det_cam_mean:<12.4f} {track_cam_mean:<12.4f} {cam_improvement:>11}\n")
+
+            f.write("\n")
+
+            # Detection Details
+            f.write("🔍 DETECTION DETAILS\n")
+            f.write("─" * 50 + "\n")
+            f.write(
+                f"TP/FP/FN: {det['true_positives']}/{det['false_positives']}/{det['false_negatives']} | Associations: {det['total_associations']} | Avg Det/Frame: {det['avg_detections_per_frame']:.1f}\n")
+            if det['mean_euclidean_distance_m'] != float('inf'):
+                f.write(
+                    f"Distance Stats: Mean={det['mean_euclidean_distance_m']:.2f}m, Std={det['std_euclidean_distance_m']:.2f}m, Range=[{det['min_distance_m']:.2f}, {det['max_distance_m']:.2f}]m\n")
+            else:
+                f.write("Distance Stats: No valid associations\n")
+            f.write("\n")
+
+            # Tracking Details
+            f.write("🔄 TRACKING DETAILS\n")
+            f.write("─" * 50 + "\n")
+            f.write(
+                f"TP/FP/FN: {track['true_positives']}/{track['false_positives']}/{track['false_negatives']} | Associations: {track['total_associations']} | Avg Tracks/Frame: {track['avg_detections_per_frame']:.1f}\n")
+            if track['mean_euclidean_distance_m'] != float('inf'):
+                f.write(
+                    f"Distance Stats: Mean={track['mean_euclidean_distance_m']:.2f}m, Std={track['std_euclidean_distance_m']:.2f}m, Range=[{track['min_distance_m']:.2f}, {track['max_distance_m']:.2f}]m\n")
+            else:
+                f.write("Distance Stats: No valid associations\n")
+            f.write("\n")
+
+            # Camera IoU Details
+            if camera_iou:
+                f.write("📷 CAMERA IoU DETAILS\n")
+                f.write("─" * 50 + "\n")
+                det_cam_iou = camera_iou.get('detection_camera_iou', {})
+                track_cam_iou = camera_iou.get('tracking_camera_iou', {})
+
+                f.write(
+                    f"Detection: Mean={det_cam_iou.get('mean', 0.0):.4f}, Std={det_cam_iou.get('std', 0.0):.4f}, Median={det_cam_iou.get('median', 0.0):.4f}, Count={det_cam_iou.get('count', 0)}\n")
                 if track_cam_iou.get('count', 0) > 0:
-                    f.write(f"   • Tracking Mean IoU:     {track_cam_iou.get('mean', 0.0):.3f}\n")
-                    f.write(f"   • Tracking Std IoU:      {track_cam_iou.get('std', 0.0):.3f}\n")
-                    f.write(f"   • Tracking Count:        {track_cam_iou.get('count', 0)}\n")
-
-                    # Calculate camera IoU improvement
-                    if det_cam_iou.get('mean', 0) > 0:
-                        cam_improvement = ((track_cam_iou.get('mean', 0) - det_cam_iou.get('mean',
-                                                                                           0)) / det_cam_iou.get(
-                            'mean',
-                            0)) * 100
-                        f.write(f"   • Camera IoU Improvement: {cam_improvement:+.1f}%\n")
-
+                    f.write(
+                        f"Tracking: Mean={track_cam_iou.get('mean', 0.0):.4f}, Std={track_cam_iou.get('std', 0.0):.4f}, Median={track_cam_iou.get('median', 0.0):.4f}, Count={track_cam_iou.get('count', 0)}\n")
                 f.write("\n")
 
-            # Performance Comparison
-            comp = report['performance_comparison']
-            f.write("📈 PERFORMANCE COMPARISON (Tracking vs Detection):\n")
-            f.write(f"   • Precision Improvement:     {comp['precision']['improvement_percent']:+.1f}%\n")
-            f.write(f"   • Recall Improvement:        {comp['recall']['improvement_percent']:+.1f}%\n")
-            f.write(f"   • F1-Score Improvement:      {comp['f1_score']['improvement_percent']:+.1f}%\n")
-            f.write(f"   • DetA Improvement:          {comp['det_a']['improvement_percent']:+.1f}%\n")
-            f.write(
-                f"   • Distance Improvement:      {comp['mean_euclidean_distance_m']['improvement_percent']:+.1f}%\n")
-            f.write(f"   • MOTP Improvement:          {comp['motp_m']['improvement_percent']:+.1f}%\n\n")
+            # Performance Analysis
+            f.write("📊 PERFORMANCE ANALYSIS\n")
+            f.write("─" * 50 + "\n")
 
-            f.write("=" * 80 + "\n")
+            # Overall assessment
+            avg_improvement = (comp['precision']['improvement_percent'] +
+                               comp['recall']['improvement_percent'] +
+                               comp['f1_score']['improvement_percent']) / 3
 
-        print(f"📄 Text report saved to: {output_path}")
+            if avg_improvement > 5:
+                assessment = "✅ TRACKING SIGNIFICANTLY IMPROVES PERFORMANCE"
+            elif avg_improvement > 1:
+                assessment = "✅ Tracking provides modest improvement"
+            elif avg_improvement > -1:
+                assessment = "⚖️ Tracking performance is comparable to detection"
+            else:
+                assessment = "⚠️ Tracking underperforms compared to detection"
+
+            f.write(f"{assessment} (Avg Improvement: {avg_improvement:+.1f}%)\n")
+
+            # Key insights in one line
+            insights = []
+            if comp['precision']['improvement_percent'] > 5:
+                insights.append("Reduces false positives")
+            elif comp['precision']['improvement_percent'] < -5:
+                insights.append("Increases false positives")
+
+            if comp['recall']['improvement_percent'] > 5:
+                insights.append("Reduces missed detections")
+            elif comp['recall']['improvement_percent'] < -5:
+                insights.append("Increases missed detections")
+
+            if abs(comp['mean_euclidean_distance_m']['improvement_percent']) > 10:
+                if comp['mean_euclidean_distance_m']['improvement_percent'] > 0:
+                    insights.append("Improves spatial accuracy")
+                else:
+                    insights.append("Reduces spatial accuracy")
+
+            if insights:
+                f.write(f"Key Insights: {' | '.join(insights)}\n")
+            f.write("\n")
+
+            # Footer
+            f.write("═" * 100 + "\n")
+            f.write("Report generated by Tracking & Detection Evaluator\n")
+            f.write("═" * 100 + "\n")
 
     def print_summary_report(self) -> None:
         """Print a formatted summary report."""
