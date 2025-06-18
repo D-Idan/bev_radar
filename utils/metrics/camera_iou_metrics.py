@@ -24,6 +24,8 @@ class CameraIoUCalculator:
         self.image_width = image_width
         self.image_height = image_height
 
+        self.labels_image_width, self.labels_image_height = 1920, 1080
+
     def _get_scale_factor(self, image_shape: Tuple[int, int]) -> Tuple[float, float]:
         """
         Get scale factor to match visualization scaling.
@@ -35,8 +37,8 @@ class CameraIoUCalculator:
             (scale_w, scale_h): Scale factors for width and height
         """
         height, width = image_shape[:2]
-        scale_w = width / self.image_width
-        scale_h = height / self.image_height
+        scale_w = width / self.labels_image_width
+        scale_h = height / self.labels_image_height
         return scale_w, scale_h
 
     def range_azimuth_to_camera_bbox_consistent(self, range_m: float, azimuth_deg: float,
@@ -358,3 +360,162 @@ def print_camera_iou_summary(iou_results: Dict[str, any]) -> None:
             print(f"   • Mean IoU Improvement: {improvement:+.1f}%")
 
     print("\n" + "=" * 60)
+
+
+def debug_detailed_iou():
+    """Detailed debug function to understand the coordinate transformation"""
+    calculator = CameraIoUCalculator()
+
+    # Test with sample data
+    sample_range = 10.0
+    sample_azimuth = 0.0
+    image_shape = (540, 960)
+
+    print("=== DEBUGGING COORDINATE TRANSFORMATION ===")
+
+    # Step 1: Check world coordinates
+    x = np.sin(np.deg2rad(sample_azimuth)) * sample_range
+    y = np.cos(np.deg2rad(sample_azimuth)) * sample_range
+    print(f"World coordinates: x={x}, y={y}")
+
+    # Step 2: Check worldToImage function
+    from utils.util import worldToImage  # Make sure this import works
+
+    u1, v1 = worldToImage(-x - 0.9, y, 0)
+    u2, v2 = worldToImage(-x + 0.9, y, 1.6)
+    print(f"Before scaling: corner1=({u1}, {v1}), corner2=({u2}, {v2})")
+
+    # Step 3: Check scaling
+    u1_scaled, v1_scaled = int(u1 / 2), int(v1 / 2)
+    u2_scaled, v2_scaled = int(u2 / 2), int(v2 / 2)
+    print(f"After scaling: corner1=({u1_scaled}, {v1_scaled}), corner2=({u2_scaled}, {v2_scaled})")
+
+    # Step 4: Generate prediction bbox
+    pred_bbox = calculator.range_azimuth_to_camera_bbox_consistent(
+        sample_range, sample_azimuth, image_shape
+    )
+    print(f"Final prediction bbox: {pred_bbox}")
+
+    # Step 5: Test with different label bboxes
+    test_cases = [
+        (100, 100, 200, 200),  # Original test
+        (350, 200, 450, 300),  # Closer to prediction
+        (400, 248, 500, 350),  # Overlapping with prediction
+        (450, 300, 550, 400),  # Partially overlapping
+    ]
+
+    print("\n=== TESTING DIFFERENT LABEL BBOXES ===")
+    for i, label_bbox in enumerate(test_cases):
+        iou = calculator.calculate_bbox_iou(pred_bbox, label_bbox)
+        print(f"Test {i + 1}: Label bbox {label_bbox} -> IoU: {iou}")
+
+        # Manual intersection check
+        x1_min, y1_min, x1_max, y1_max = pred_bbox
+        x2_min, y2_min, x2_max, y2_max = label_bbox
+
+        inter_x_min = max(x1_min, x2_min)
+        inter_y_min = max(y1_min, y2_min)
+        inter_x_max = min(x1_max, x2_max)
+        inter_y_max = min(y1_max, y2_max)
+
+        has_intersection = inter_x_min < inter_x_max and inter_y_min < inter_y_max
+        print(f"  Intersection area: ({inter_x_min}, {inter_y_min}) to ({inter_x_max}, {inter_y_max})")
+        print(f"  Has intersection: {has_intersection}")
+
+        if has_intersection:
+            inter_area = (inter_x_max - inter_x_min) * (inter_y_max - inter_y_min)
+            area1 = (x1_max - x1_min) * (y1_max - y1_min)
+            area2 = (x2_max - x2_min) * (y2_max - y2_min)
+            union_area = area1 + area2 - inter_area
+            manual_iou = inter_area / union_area
+            print(f"  Manual IoU calculation: {manual_iou}")
+        print()
+
+
+def debug_real_data_alignment(predictions_csv, labels_csv, max_frames=5):
+    """Debug the alignment between real predictions and labels"""
+    import pandas as pd
+
+    predictions_df = pd.read_csv(predictions_csv)
+    labels_df = pd.read_csv(labels_csv, sep='\t|,', engine='python')
+
+    # Find frames with both predictions and labels
+    pred_frames = set(predictions_df['sample_id'].unique())
+    label_frames = set(labels_df['numSample'].unique())
+    common_frames = sorted(list(pred_frames.intersection(label_frames)))[:max_frames]
+
+    print(f"Found {len(common_frames)} common frames to analyze")
+
+    calculator = CameraIoUCalculator()
+    image_shape = (540, 960)
+
+    for frame_id in common_frames:
+        print(f"\n{'=' * 50}")
+        print(f"FRAME {frame_id}")
+        print(f"{'=' * 50}")
+
+        pred_frame = predictions_df[predictions_df['sample_id'] == frame_id]
+        label_frame = labels_df[labels_df['numSample'] == frame_id]
+
+        print(f"Predictions: {len(pred_frame)}, Labels: {len(label_frame)}")
+
+        # Analyze all predictions in this frame
+        pred_bboxes = []
+        for _, pred_row in pred_frame.iterrows():
+            bbox = calculator.range_azimuth_to_camera_bbox_consistent(
+                pred_row['range_m'], pred_row['azimuth_deg'], image_shape
+            )
+            pred_bboxes.append(bbox)
+            print(f"  Pred: range={pred_row['range_m']:.1f}m, azimuth={pred_row['azimuth_deg']:.1f}° -> bbox={bbox}")
+
+        # Analyze all labels in this frame
+        label_bboxes = []
+        for _, label_row in label_frame.iterrows():
+            # Check what pixel coordinate columns exist
+            pix_cols = [col for col in label_row.keys() if 'pix' in col.lower()]
+            print(f"  Label pixel columns available: {pix_cols}")
+
+            if all(col in label_row.keys() for col in ['x1_pix', 'y1_pix', 'x2_pix', 'y2_pix']):
+                raw_bbox = (label_row['x1_pix'], label_row['y1_pix'], label_row['x2_pix'], label_row['y2_pix'])
+                bbox = calculator.get_label_bbox_consistent(label_row, image_shape)
+                label_bboxes.append(bbox)
+                print(f"  Label: raw_pix={raw_bbox} -> scaled_bbox={bbox}")
+
+                # Check if label has radar coordinates too
+                if 'radar_R_m' in label_row.keys() and 'radar_A_deg' in label_row.keys():
+                    print(
+                        f"    Label radar: range={label_row['radar_R_m']:.1f}m, azimuth={label_row['radar_A_deg']:.1f}°")
+            else:
+                print(f"  Label: Missing required pixel coordinates")
+
+        # Calculate distances between prediction and label centers
+        if pred_bboxes and label_bboxes:
+            print(f"\n  Distance Analysis:")
+            for i, pred_bbox in enumerate(pred_bboxes):
+                pred_center = ((pred_bbox[0] + pred_bbox[2]) / 2, (pred_bbox[1] + pred_bbox[3]) / 2)
+                for j, label_bbox in enumerate(label_bboxes):
+                    label_center = ((label_bbox[0] + label_bbox[2]) / 2, (label_bbox[1] + label_bbox[3]) / 2)
+                    distance = np.sqrt(
+                        (pred_center[0] - label_center[0]) ** 2 + (pred_center[1] - label_center[1]) ** 2)
+                    iou = calculator.calculate_bbox_iou(pred_bbox, label_bbox)
+                    print(
+                        f"    Pred{i} center={pred_center} <-> Label{j} center={label_center}: distance={distance:.1f}px, IoU={iou:.3f}")
+
+        print(f"\n  Image bounds check:")
+        print(f"    Image shape: {image_shape} (height x width)")
+        all_bboxes = pred_bboxes + label_bboxes
+        for i, bbox in enumerate(all_bboxes):
+            bbox_type = "Pred" if i < len(pred_bboxes) else "Label"
+            in_bounds = (0 <= bbox[0] < image_shape[1] and 0 <= bbox[1] < image_shape[0] and
+                         0 <= bbox[2] < image_shape[1] and 0 <= bbox[3] < image_shape[0])
+            print(f"    {bbox_type} bbox {bbox}: in_bounds={in_bounds}")
+
+
+
+if __name__ == "__main__":
+    # Run debug function if this script is executed directly
+    # debug_detailed_iou()
+
+    # Run this with your actual files
+    debug_real_data_alignment("/Users/daniel/Idan/University/Masters/Thesis/2025/repos/bev_radar/plots/predictions/all_predictions.csv",
+                              "/Volumes/ELEMENTS/datasets/radial/labels_CVPR.csv")
