@@ -591,7 +591,7 @@ if __name__ == "__main__":
         'output_dir': str(path_file_par / Path('plots/tracking_output')),
         'tracker_config': custom_tracker_config,
         'create_video': True,
-        'max_video_samples': 50 #None #50  # Limit video to first 50 samples for performance
+        'max_video_samples': None #None #50  # Limit video to first 50 samples for performance
     }
 
     offline_tracking(**args)

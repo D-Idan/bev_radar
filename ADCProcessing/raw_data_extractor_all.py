@@ -1,6 +1,7 @@
 import os
 import json
 import argparse
+import time
 from pathlib import Path
 
 import cv2
@@ -19,6 +20,22 @@ def ensure_dirs(base_dir, subdirs):
     # create labels.csv placeholder
     open(os.path.join(base_dir, 'labels.csv'), 'w').close()
 
+def safe_save_with_retry(save_func, filepath, data, max_retries=3, delay=1):
+    """Safely save data with retry logic"""
+    for attempt in range(max_retries):
+        try:
+            save_func(filepath, data)
+            return True
+        except (OSError, IOError) as e:
+            print(f"Attempt {attempt + 1} failed for {filepath}: {e}")
+            if attempt < max_retries - 1:
+                print(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+                delay *= 2  # Exponential backoff
+            else:
+                print(f"Failed to save {filepath} after {max_retries} attempts")
+                return False
+    return False
 
 def extract_all(config):
     # Load configuration
@@ -52,36 +69,65 @@ def extract_all(config):
         numSample = rec_labels[rec_labels['index'] == idx]['numSample'].iloc[0]
         tag = f"{numSample:06d}"
 
-        # Extract timestamp (using camera as reference, but you can use any sensor)
+        # Define all output file paths
+        adc_path = os.path.join(base, 'ADC_Data', f'adc_{tag}.npy')
+        img_path = os.path.join(base, 'camera', f'image_{tag}.jpg')
+        rd_path = os.path.join(base, 'radar_RD', f'rd_{tag}.npy')
+        ra_path = os.path.join(base, 'radar_RA', f'ra_{tag}.npy')
+
+        # Check if all files already exist - if so, skip processing but still collect labels
+        files_exist = all(os.path.exists(path) for path in [adc_path, img_path, rd_path, ra_path])
+
+        if files_exist:
+            # Still need to collect labels for this sample
+            timestamp = sample['radar_ch1']['timestamp']  # Get timestamp for labels
+            boxes = rec_labels[rec_labels['index'] == idx]
+            boxes_out = boxes.copy()
+            boxes_out['filename'] = tag
+            boxes_out['timestamp_us'] = timestamp
+            collected.append(boxes_out)
+            continue  # Skip to next iteration
+
+        # Extract timestamp (using radar as reference, but you can use any sensor)
         # The timestamp is in microseconds
         timestamp = sample['radar_ch1']['timestamp']
 
         # 1. ADC_Data
-        adc = RSP_ADC.run(
-            sample['radar_ch0']['data'], sample['radar_ch1']['data'],
-            sample['radar_ch2']['data'], sample['radar_ch3']['data']
-        )
-        np.save(os.path.join(base, 'ADC_Data', f'adc_{tag}.npy'), adc)
+        if not os.path.exists(adc_path):
+            adc = RSP_ADC.run(
+                sample['radar_ch0']['data'], sample['radar_ch1']['data'],
+                sample['radar_ch2']['data'], sample['radar_ch3']['data']
+            )
+            if not safe_save_with_retry(np.save, adc_path, adc):
+                print(f"Skipping sample {tag} due to save error")
+                continue
 
         # 2. camera -> save jpg
-        cam = sample['camera']['data']
-        img_path = os.path.join(base, 'camera', f'image_{tag}.jpg')
-        # Resize to (width=960, height=540)
-        resized = cv2.resize(cam, (960, 540))
-        cv2.imwrite(img_path, resized)
+        if not os.path.exists(img_path):
+            cam = sample['camera']['data']
+            resized = cv2.resize(cam, (960, 540))
+            if not safe_save_with_retry(cv2.imwrite, img_path, resized):
+                print(f"Skipping sample {tag} due to save error")
+                continue
 
         # 3. radar_RD -> save as NPY
-        rd = RSP_RD.run(sample['radar_ch0']['data'], sample['radar_ch1']['data'],
-                        sample['radar_ch2']['data'], sample['radar_ch3']['data']
-                        ).numpy()
-        rd_map = np.log10(np.sum(np.abs(rd), axis=2) + 1e-6)
-        np.save(os.path.join(base, 'radar_RD', f'rd_{tag}.npy'), rd_map)
+        if not os.path.exists(rd_path):
+            rd = RSP_RD.run(sample['radar_ch0']['data'], sample['radar_ch1']['data'],
+                            sample['radar_ch2']['data'], sample['radar_ch3']['data']
+                            ).numpy()
+            rd_map = np.log10(np.sum(np.abs(rd), axis=2) + 1e-6)
+            if not safe_save_with_retry(np.save, rd_path, rd_map):
+                print(f"Skipping sample {tag} due to save error")
+                continue
 
         # 4. radar_RA -> save as NPY
-        ra = RSP_RA.run(sample['radar_ch0']['data'], sample['radar_ch1']['data'],
-                        sample['radar_ch2']['data'], sample['radar_ch3']['data']
-                        )
-        np.save(os.path.join(base, 'radar_RA', f'ra_{tag}.npy'), ra)
+        if not os.path.exists(ra_path):
+            ra = RSP_RA.run(sample['radar_ch0']['data'], sample['radar_ch1']['data'],
+                            sample['radar_ch2']['data'], sample['radar_ch3']['data']
+                            )
+            if not safe_save_with_retry(np.save, ra_path, ra):
+                print(f"Skipping sample {tag} due to save error")
+                continue
 
         # collect label entries with timestamp
         boxes = rec_labels[rec_labels['index'] == idx]
