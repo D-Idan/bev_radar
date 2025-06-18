@@ -257,7 +257,7 @@ class TrackletManager:
         print(f"Average Tracklet Lifetime: {summary['average_lifetime']:.1f} frames")
         print(f"Max Tracklet Lifetime: {summary['max_lifetime']} frames")
         print(f"Average Confidence: {summary['average_confidence']:.3f}")
-        print(f"Total Distance Traveled: {summary['total_distance_all_tracks']:.1f} meters")
+        print(f"Total Relative Distance Traveled: {summary['total_distance_all_tracks']:.1f} meters")
 
         if 'evaluation_frames' in summary:
             print(f"\nEVALUATION METRICS:")

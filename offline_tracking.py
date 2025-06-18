@@ -18,7 +18,7 @@ from visualizations.track_viz import (
 )
 from visualizations.tracking_visualization import create_tracking_video
 from visualizations.visualize_timing import plot_timing_analysis, plot_detailed_timing_analysis
-from utils.metrics.tracking_metrics import TrackingEvaluator
+from utils.metrics.tracking_metrics import evaluate_tracking_sequence
 
 def setup_tracking_system():
     """
@@ -190,7 +190,8 @@ def offline_tracking(
         output_dir: str = "tracking_output",
         tracker_config: Optional[dict] = None,
         create_video: bool = True,
-        max_video_samples: Optional[int] = 100
+        max_video_samples: Optional[int] = 100,
+        max_frames: Optional[int] = None,
 ):
     """
     Main offline‐tracking function with visualization and evaluation with timestamp support:
@@ -207,6 +208,7 @@ def offline_tracking(
         tracker_config: Optional tracker configuration override
         create_video: Whether to create tracking visualization video
         max_video_samples: Maximum samples to include in video (for performance)
+        max_frames: Maximum number of frames to process for debugging (None = all frames)
     """
 
     # Setup output directory structure
@@ -224,6 +226,12 @@ def offline_tracking(
 
     # 2) Unique frame IDs (sample_id) in sorted order
     all_frames = sorted(preds_df['sample_id'].unique().tolist())
+
+    # Limit frames for debugging if specified
+    if max_frames is not None:
+        all_frames = all_frames[:max_frames]
+        print(f"Debug mode: Processing only first {len(all_frames)} frames")
+        max_video_samples = max_frames if not max_video_samples else min(max_video_samples, max_frames)
 
     # 3) Initialize tracker
     if tracker_config is not None:
@@ -443,58 +451,16 @@ def offline_tracking(
 
         sys.stdout = original_stdout
 
-    # ===== ENHANCED EVALUATION METRICS =====
-    print("\nRunning comprehensive tracking evaluation...")
-
-    evaluator = TrackingEvaluator(distance_threshold=config.get('max_distance_threshold', 5.0))
-
-    # Evaluate frame by frame
-    for frame_id in all_frames:
-        # Filter data for this frame
-        frame_preds = preds_df[preds_df['sample_id'] == frame_id]
-        frame_labels = labels_df[labels_df['numSample'] == frame_id]
-        frame_tracks = track_df[track_df['sample_id'] == frame_id] if not track_df.empty else pd.DataFrame()
-
-        if not frame_labels.empty:  # Only evaluate frames with ground truth
-            evaluator.evaluate_frame(frame_preds, frame_labels, frame_tracks, frame_id)
-
-    # Generate and save comprehensive evaluation report
-    evaluation_report = evaluator.generate_comprehensive_report()
-    eval_report_path = output_paths['logs'] / 'comprehensive_evaluation.json'
-    evaluator.save_report(str(eval_report_path))
-
-    # Save summary metrics to text file
-    summary_path = output_paths['logs'] / 'evaluation_summary.txt'
-    with open(summary_path, 'w') as f:
-        f.write("COMPREHENSIVE TRACKING EVALUATION SUMMARY\n")
-        f.write("=" * 50 + "\n\n")
-
-        if 'summary' in evaluation_report:
-            summary = evaluation_report['summary']
-            f.write(f"Frames Evaluated: {summary.get('frames_evaluated', 0)}\n")
-            f.write(f"MOTA (Multiple Object Tracking Accuracy): {summary.get('mota', 0):.3f}\n")
-            f.write(f"MOTP (Multiple Object Tracking Precision): {summary.get('motp', 0):.3f} meters\n\n")
-
-        if 'detection_performance' in evaluation_report:
-            det_perf = evaluation_report['detection_performance']
-            f.write("DETECTION PERFORMANCE:\n")
-            f.write(f"  Overall Precision: {det_perf.get('overall_precision', 0):.3f}\n")
-            f.write(f"  Overall Recall: {det_perf.get('overall_recall', 0):.3f}\n")
-            f.write(f"  Overall F1-Score: {det_perf.get('overall_f1_score', 0):.3f}\n\n")
-
-        if 'tracking_performance' in evaluation_report:
-            track_perf = evaluation_report['tracking_performance']
-            f.write("TRACKING PERFORMANCE:\n")
-            f.write(f"  Overall Precision: {track_perf.get('overall_precision', 0):.3f}\n")
-            f.write(f"  Overall Recall: {track_perf.get('overall_recall', 0):.3f}\n")
-            f.write(f"  Overall F1-Score: {track_perf.get('overall_f1_score', 0):.3f}\n\n")
-
-        if 'distance_analysis' in evaluation_report:
-            dist_analysis = evaluation_report['distance_analysis']
-            f.write("DISTANCE ANALYSIS:\n")
-            f.write(f"  Mean Distance Error: {dist_analysis.get('overall_mean_distance', 0):.2f} meters\n")
-            f.write(f"  Distance Std Dev: {dist_analysis.get('overall_std_distance', 0):.2f} meters\n")
-            f.write(f"  Frames with Valid Associations: {dist_analysis.get('frames_with_valid_associations', 0)}\n\n")
+    # Run evaluation
+    eval_report_path, report = evaluate_tracking_sequence(
+                        predictions_csv= preds_csv,
+                        ground_truth_csv= labels_csv,
+                        tracking_csv= tracking_csv_path,
+                        output_dir= output_paths['logs'],
+                        distance_threshold= config['max_distance_threshold'],
+                        iou_threshold= 0.5,  # Default IoU threshold for evaluation
+                        max_frames= max_frames,
+    )
 
     # ===== ENHANCED VISUALIZATION AND VIDEO CREATION =====
     if create_video:
@@ -591,7 +557,9 @@ if __name__ == "__main__":
         'output_dir': str(path_file_par / Path('plots/tracking_output')),
         'tracker_config': custom_tracker_config,
         'create_video': True,
-        'max_video_samples': None #None #50  # Limit video to first 50 samples for performance
+        'max_video_samples': None, #None #50  # Limit video to first 50 samples for performance
+        'max_frames': 50, # Limit to first 50 frames for debugging
+
     }
 
     offline_tracking(**args)
