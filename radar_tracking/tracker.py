@@ -51,10 +51,6 @@ class RadarTracker:
         'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
 
         # Mahalanobis distance parameters
-        'use_mahalanobis': True,
-        'chi2_threshold_95': 5.991,    # 95% confidence for 2 DOF
-        'chi2_threshold_99': 9.210,    # 99% confidence for 2 DOF
-        'chi2_threshold_99_9': 13.816, # 99.9% confidence for 2 DOF
         'default_chi2_threshold': 5.991,  # Use 95% as default
 
         # Range culling parameters - configured for your radar
@@ -110,10 +106,6 @@ class RadarTracker:
         self.azimuth_buffer_deg = config['azimuth_buffer_deg']
 
         # Mahalanobis parameters
-        self.use_mahalanobis = config['use_mahalanobis']
-        self.chi2_threshold_95 = config['chi2_threshold_95']
-        self.chi2_threshold_99 = config['chi2_threshold_99']
-        self.chi2_threshold_99_9 = config['chi2_threshold_99_9']
         self.default_chi2_threshold = config['default_chi2_threshold']
 
         # Kalman Filter parameters

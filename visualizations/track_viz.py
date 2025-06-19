@@ -47,9 +47,9 @@ def visualize_frame_radar_azimuth(
     azimuth_buffer = radar_config.get('azimuth_buffer_deg', 5.0)
 
     # Chi-square thresholds for visualization
-    chi2_95 = radar_config.get('chi2_threshold_95', 5.991)
-    chi2_99 = radar_config.get('chi2_threshold_99', 9.210)
-    chi2_99_9 = radar_config.get('chi2_threshold_99_9', 13.816)
+    chi2_95 = 5.991
+    chi2_99 = 9.210
+    chi2_99_9 = 13.816
 
     # Collect data points for zoom calculation
     all_azimuths = []
