@@ -506,42 +506,54 @@ if __name__ == "__main__":
 
     # Example with custom tracker config for confidence-based tracking
     custom_tracker_config = {
-        'max_age': 3,
-        'min_hits': 3,
-        'max_velocity_ms': 83.3,  # 300 km/h = 83.3 m/s
+        # ========== TRACK LIFECYCLE PARAMETERS ==========
+        'max_age': 3,  # Max frames without detection before track deletion
+        'min_hits': 3,  # Min detections required for track confirmation
+        'max_velocity_ms': 83.3,  # 300 km/h = 83.3 m/s - max expected object velocity
+
+        # ========== TIMING PARAMETERS ==========
         'base_dt': 0.2,  # 200ms base time step
         'max_dt_gap': 1.0,  # Trigger multi-step prediction for gaps > 1.0s
-        'max_time_without_update': 1.0,  # Kill tracks after 1 seconds
-        'max_frame_gap_time': 2.0,       # Kill all tracks if frame gap > 2 seconds
+        'max_time_without_update': 1.0,  # Kill tracks after 1 second without update
+        'max_frame_gap_time': 2.0,  # Kill all tracks if frame gap > 2 seconds
 
-        # Confidence-based parameters
-        'min_confidence_init': 0.5,
-        'min_confidence_assoc': 0.2,
-        'confidence_weight': 0.3,
-        'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
+        # ========== ASSOCIATION STRATEGY ==========
+        'association_strategy': 'confidence_weighted_r',  # Available: "distance_only", "confidence_weighted",
+        # "confidence_gated", "hybrid_score", "mahalanobis_distance",
+        # "confidence_weighted_r"
 
-        # Mahalanobis distance parameters
-        # 4.605 - 90%, # 5.991 - 95%, 6.635 - 99% confidence
-        'default_chi2_threshold': 4.605,  # Used for mahalanobis based association_strategies
+        # ========== CONFIDENCE-BASED PARAMETERS ==========
+        'min_confidence_init': 0.5,  # Minimum confidence to create new tracks
+        'min_confidence_assoc': 0.2,  # Minimum confidence for detection-track association
+        'confidence_weight': 0.3,  # Weight factor for confidence in hybrid strategies
 
-        # Range culling parameters - configured for your radar
-        'enable_range_culling': True,
-        'max_range': 103.0,  # Your radar's max range
-        'min_azimuth_deg': -90.0,  # Your radar's azimuth limits
-        'max_azimuth_deg': 90.0,
-        'range_buffer': 10.0,  # 10m buffer to avoid killing tracks just outside
-        'azimuth_buffer_deg': 5.0,  # 5° buffer for azimuth
+        # NEW: Confidence-based R matrix weighting
+        'r_weighting_strategy': 'squared',  # "squared", "linear", "stepped" - how to weight R by confidence
+        'confidence_r_scaling': True,  # Enable/disable confidence-based R scaling
 
-        # Kalman Filter Parameters
+        # ========== MAHALANOBIS DISTANCE PARAMETERS ==========
+        'default_chi2_threshold': 4.605,  # Chi-squared threshold for gating
+        # 4.605 = 90%, 5.991 = 95%, 6.635 = 99% confidence
+
+        # ========== RADAR COVERAGE PARAMETERS ==========
+        'enable_range_culling': True,  # Enable automatic track culling outside radar coverage
+        'max_range': 103.0,  # Radar maximum range (meters)
+        'min_azimuth_deg': -90.0,  # Radar minimum azimuth (degrees)
+        'max_azimuth_deg': 90.0,  # Radar maximum azimuth (degrees)
+        'range_buffer': 10.0,  # Range buffer to avoid premature track deletion (meters)
+        'azimuth_buffer_deg': 5.0,  # Azimuth buffer to avoid premature track deletion (degrees)
+
+        # ========== KALMAN FILTER PARAMETERS ==========
         'kalman_config': {
-            'process_noise_q_std': 1.0,  # Reduced from default 3.0
-            'measurement_noise_std': 0.5,  # Radar accuracy (meters) std
-            'initial_pos_std': 2.0,  # Initial position uncertainty
-            'initial_vel_std': 5.0,  # Initial velocity uncertainty
+            'process_noise_q_std': 1.0,  # Process noise standard deviation (reduced from 3.0)
+            'measurement_noise_std': 0.5,  # Base measurement noise std dev (meters)
+            # Note: This will be modulated by confidence when using confidence_weighted_r
+            'initial_pos_std': 2.0,  # Initial position uncertainty standard deviation
+            'initial_vel_std': 5.0,  # Initial velocity uncertainty standard deviation
         },
 
-        # Evaluation parameters
-        'max_distance_threshold': 2.0,  # Distance threshold for valid associations
+        # ========== EVALUATION PARAMETERS ==========
+        'max_distance_threshold': 2.0,  # Distance threshold for valid associations in evaluation (meters)
     }
 
     args = {

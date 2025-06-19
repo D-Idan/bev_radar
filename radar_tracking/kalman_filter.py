@@ -5,7 +5,7 @@ Kalman filter implementation for radar object tracking.
 Adapted for 2D position and velocity tracking.
 """
 import numpy as np
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 from copy import deepcopy
 
 
@@ -148,17 +148,21 @@ class RadarKalmanFilter:
     def update(self,
                state: np.ndarray,
                covariance: np.ndarray,
-               measurement: Tuple[float, float]) -> Tuple[np.ndarray, np.ndarray]:
+               measurement: Tuple[float, float],
+               confidence: Optional[float] = None,
+               r_strategy: str = "squared") -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Update state estimate with new measurement.
+        Update state estimate with new measurement using confidence-weighted R.
 
         Args:
             state: Predicted state vector
             covariance: Predicted state covariance matrix
             measurement: New measurement (x, y)
+            confidence: Detection confidence for R weighting (optional)
+            r_strategy: Strategy for R weighting ("squared", "linear", "stepped")
 
         Returns:
-            Tuple of (updated_state, updated_covariance)
+            Tuple of (updated_state, updated_covariance, innovation)
         """
         # Convert measurement to numpy array
         z = np.array([measurement[0], measurement[1]])
@@ -166,8 +170,14 @@ class RadarKalmanFilter:
         # Innovation: y = z - H * x_{k|k-1}
         innovation = z - self.H @ state
 
+        # Get confidence-weighted R matrix
+        if confidence is not None:
+            R_weighted = self.get_confidence_weighted_R(confidence, r_strategy)
+        else:
+            R_weighted = self.R
+
         # Innovation covariance: S = H * P_{k|k-1} * H^T + R
-        innovation_cov = self.H @ covariance @ self.H.T + self.R
+        innovation_cov = self.H @ covariance @ self.H.T + R_weighted
 
         # Kalman gain: K = P_{k|k-1} * H^T * S^{-1}
         kalman_gain = covariance @ self.H.T @ np.linalg.inv(innovation_cov)
@@ -212,3 +222,32 @@ class RadarKalmanFilter:
         distance = innovation.T @ np.linalg.inv(innovation_cov) @ innovation
 
         return float(distance)
+
+    def get_confidence_weighted_R(self, confidence: float, strategy: str = "squared") -> np.ndarray:
+        """
+        Get measurement noise covariance matrix weighted by detection confidence.
+
+        Args:
+            confidence: Detection confidence score (0.0 to 1.0)
+            strategy: Weighting strategy ("squared", "linear", "stepped")
+
+        Returns:
+            Confidence-weighted R matrix
+        """
+        if strategy == "squared":
+            # R = R_base / conf^2 (lower confidence = higher noise)
+            # Clamp confidence to reasonable range to avoid extreme R values
+            confidence_clamped = np.clip(confidence, 0.05, 1.0)  # Min 5%, Max 100%
+            confidence_factor = 1.0 / (confidence_clamped ** 2)
+            # Optional: Add upper bound to prevent extremely high noise
+            confidence_factor = min(confidence_factor, 100.0)  # Max 100x base noise
+        elif strategy == "linear":
+            # Will implement later
+            confidence_factor = 1.0
+        elif strategy == "stepped":
+            # Will implement later
+            confidence_factor = 1.0
+        else:
+            confidence_factor = 1.0
+
+        return self.R * confidence_factor

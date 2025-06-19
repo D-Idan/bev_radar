@@ -20,6 +20,7 @@ class AssociationStrategy(Enum):
     CONFIDENCE_GATED = "confidence_gated"
     HYBRID_SCORE = "hybrid_score"
     MAHALANOBIS_DISTANCE = "mahalanobis_distance"
+    CONFIDENCE_WEIGHTED_R = "confidence_weighted_r"
 
 class RadarTracker:
     """
@@ -49,6 +50,8 @@ class RadarTracker:
         'min_confidence_assoc': 0.2,
         'confidence_weight': 0.3,
         'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
+        'r_weighting_strategy': 'squared',  # "squared", "linear", "stepped"
+        'confidence_r_scaling': True,  # Enable/disable confidence-based R scaling
 
         # Mahalanobis distance parameters
         'default_chi2_threshold': 5.991,  # Use 95% as default
@@ -96,6 +99,8 @@ class RadarTracker:
         self.min_confidence_assoc = config['min_confidence_assoc']
         self.confidence_weight = config['confidence_weight']
         association_strategy = config['association_strategy']
+        self.r_weighting_strategy = config['r_weighting_strategy']
+        self.confidence_r_scaling = config['confidence_r_scaling']
 
         # Range culling parameters
         self.enable_range_culling = config['enable_range_culling']
@@ -488,8 +493,11 @@ class RadarTracker:
                     else:
                         cost_matrix[t, d] = distance
 
-                elif self.association_strategy == AssociationStrategy.MAHALANOBIS_DISTANCE:
-                    # Use PREDICTED state and covariance for Mahalanobis distance
+
+                elif self.association_strategy in [AssociationStrategy.MAHALANOBIS_DISTANCE,
+                                                   AssociationStrategy.CONFIDENCE_WEIGHTED_R]:
+                    # The confidence weighting happens in the update step
+                    # Use standard Mahalanobis distance for association
                     pred_state = track.predicted_state if track.predicted_state is not None else track.state
                     pred_covariance = track.predicted_covariance if track.predicted_covariance is not None else track.covariance
 
@@ -498,7 +506,6 @@ class RadarTracker:
                         pred_state, pred_covariance, det_pos
                     )
                     cost_matrix[t, d] = mahal_dist
-
 
                 elif self.association_strategy == AssociationStrategy.HYBRID_SCORE:
                     # Combine distance, confidence, and track quality
@@ -559,7 +566,7 @@ class RadarTracker:
 
     def _update_track(self, track: Track, detection: Detection, dt: float = None) -> Track:
         """
-        Update track with associated detection.
+        Update track with associated detection using confidence-weighted R.
 
         Args:
             track: Track to update
@@ -605,16 +612,23 @@ class RadarTracker:
             # Normal predict→update cycle
             pred_state, pred_covariance = self.kf.predict(track.state, track.covariance, dt)
 
-
-        # Perform update step
-        updated_state, updated_covariance, innovation = self.kf.update(
-            pred_state, pred_covariance, detection.cartesian_pos
-        )
+        # Perform update step WITH confidence information
+        if self.association_strategy == AssociationStrategy.CONFIDENCE_WEIGHTED_R:
+            updated_state, updated_covariance, innovation = self.kf.update(
+                pred_state, pred_covariance, detection.cartesian_pos,
+                confidence=detection.confidence,
+                r_strategy=getattr(self, 'r_weighting_strategy', 'squared')
+            )
+        else:
+            # Standard update without confidence weighting
+            updated_state, updated_covariance, innovation = self.kf.update(
+                pred_state, pred_covariance, detection.cartesian_pos
+            )
 
         # Record update step
         track.record_update_step(updated_state, updated_covariance, detection, innovation)
 
-        # Update other track attributes
+        # Update other track attributes (unchanged)
         track.last_detection = detection
         track.hits += 1
         track.time_since_update = 0
