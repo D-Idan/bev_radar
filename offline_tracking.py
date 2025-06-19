@@ -40,10 +40,6 @@ def setup_tracking_system():
         'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
 
         # Mahalanobis distance parameters
-        'use_mahalanobis': True,
-        'chi2_threshold_95': 5.991,    # 95% confidence for 2 DOF
-        'chi2_threshold_99': 9.210,    # 99% confidence for 2 DOF
-        'chi2_threshold_99_9': 13.816, # 99.9% confidence for 2 DOF
         'default_chi2_threshold': 5.991,  # Use 95% as default
 
         # Range culling parameters - configured for your radar
@@ -525,11 +521,8 @@ if __name__ == "__main__":
         'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
 
         # Mahalanobis distance parameters
-        'use_mahalanobis': True,
-        'chi2_threshold_95': 5.991,    # 95% confidence for 2 DOF
-        'chi2_threshold_99': 9.210,    # 99% confidence for 2 DOF
-        'chi2_threshold_99_9': 13.816, # 99.9% confidence for 2 DOF
-        'default_chi2_threshold': 4.605, #4.605,  # Use 90% as default
+        # 4.605 - 90%, # 5.991 - 95%, 6.635 - 99% confidence
+        'default_chi2_threshold': 4.605,  # Used for mahalanobis based association_strategies
 
         # Range culling parameters - configured for your radar
         'enable_range_culling': True,
@@ -558,7 +551,7 @@ if __name__ == "__main__":
         'tracker_config': custom_tracker_config,
         'create_video': True,
         'max_video_samples': None, #None #50  # Limit video to first 50 samples for performance
-        'max_frames': 50, # Limit to first 50 frames for debugging
+        'max_frames': 10, # - 50 will Limit to first 50 frames for debugging
 
     }
 
