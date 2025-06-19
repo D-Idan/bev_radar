@@ -51,7 +51,6 @@ class RadarTracker:
         'confidence_weight': 0.3,
         'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
         'r_weighting_strategy': 'squared',  # "squared", "linear", "stepped"
-        'confidence_r_scaling': True,  # Enable/disable confidence-based R scaling
 
         # Mahalanobis distance parameters
         'default_chi2_threshold': 5.991,  # Use 95% as default
@@ -100,7 +99,7 @@ class RadarTracker:
         self.confidence_weight = config['confidence_weight']
         association_strategy = config['association_strategy']
         self.r_weighting_strategy = config['r_weighting_strategy']
-        self.confidence_r_scaling = config['confidence_r_scaling']
+        self.r_weighting_config = config['r_weighting_config']
 
         # Range culling parameters
         self.enable_range_culling = config['enable_range_culling']
@@ -617,7 +616,8 @@ class RadarTracker:
             updated_state, updated_covariance, innovation = self.kf.update(
                 pred_state, pred_covariance, detection.cartesian_pos,
                 confidence=detection.confidence,
-                r_strategy=getattr(self, 'r_weighting_strategy', 'squared')
+                r_strategy=getattr(self, 'r_weighting_strategy'),
+                strategy_params=getattr(self, 'r_weighting_config'),
             )
         else:
             # Standard update without confidence weighting

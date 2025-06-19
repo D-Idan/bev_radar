@@ -166,3 +166,33 @@ chi2_95 = 5.991  # 95% confidence for 2 DOF
 ```
 
 **Key Design Principle**: Parameters reflect **physical constraints** of vehicle dynamics and **sensor characteristics** of automotive radar, tuned for **highway/urban driving scenarios**.
+
+
+## Adaptive R Matrix Weighting for Kalman Filter Update
+
+We have successfully implemented **confidence-based R matrix weighting** for the Kalman filter update step in our radar tracking system. This allows the tracker to dynamically adjust measurement trust based on detection confidence scores.
+
+### ✅ **Completed Features:**
+
+1. **Three R Weighting Strategies:**
+   - **Squared**: `R = R_base / conf²` (inverse quadratic scaling)
+   - **Linear**: `R = R_base × linear_interpolation(R_min_factor, R_max_factor, conf)`
+   - **Stepped**: `R = R_base × stepped_factors[conf_range]` (optimized for datasets with many high-confidence detections)
+
+2. **New Association Strategy:**
+   - `CONFIDENCE_WEIGHTED_R`: Uses standard Mahalanobis distance for association, applies confidence weighting only in update step
+
+3. **Configurable Parameters:**
+   - Strategy selection and tuning parameters
+   - Separate min/max factors for linear strategy
+   - Customizable thresholds and factors for stepped strategy
+
+### 🔄 **Current Behavior:**
+- **Association Phase**: Uses standard Mahalanobis distance (unweighted R)
+- **Update Phase**: Uses confidence-weighted R matrix when `confidence_weighted_r` strategy is selected
+- **Other Strategies**: Remain unchanged and fully functional
+
+### ⚠️ **Important Note:**
+**The `self.kf.gating_distance()` method currently does NOT use the new confidence-weighted R matrix.** It still uses the base R matrix for Mahalanobis distance calculations during the association phase. The confidence weighting is only applied during the Kalman filter update step.
+
+This design choice maintains consistent gating behavior while allowing confidence-based measurement trust adjustment in the state estimation process.

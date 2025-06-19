@@ -527,12 +527,18 @@ if __name__ == "__main__":
         'min_confidence_assoc': 0.2,  # Minimum confidence for detection-track association
         'confidence_weight': 0.3,  # Weight factor for confidence in hybrid strategies
 
-        # NEW: Confidence-based R matrix weighting
+        # Confidence-based R matrix weighting
         'r_weighting_strategy': 'squared',  # "squared", "linear", "stepped" - how to weight R by confidence
-        'confidence_r_scaling': True,  # Enable/disable confidence-based R scaling
+        'r_weighting_config' : {
+            'linear_r_min_factor': 0.3,    # High confidence: 30% of base R
+            'linear_r_max_factor': 15.0,   # Low confidence: 15x base R
+            'stepped_r_thresholds': [0.95, 0.85, 0.75, 0.60, 0.40],  # Fine-grained for high conf
+            'stepped_r_factors': [0.1, 0.3, 0.7, 1.5, 4.0, 20.0],   # Strong preference for high conf
+        },
 
         # ========== MAHALANOBIS DISTANCE PARAMETERS ==========
         'default_chi2_threshold': 4.605,  # Chi-squared threshold for gating
+        # (When using mahalanobis distance based ASSOCIATION STRATEGY)
         # 4.605 = 90%, 5.991 = 95%, 6.635 = 99% confidence
 
         # ========== RADAR COVERAGE PARAMETERS ==========
@@ -563,7 +569,7 @@ if __name__ == "__main__":
         'tracker_config': custom_tracker_config,
         'create_video': True,
         'max_video_samples': None, #None #50  # Limit video to first 50 samples for performance
-        'max_frames': 10, # - 50 will Limit to first 50 frames for debugging
+        'max_frames': 50, # - 50 will Limit to first 50 frames for debugging
 
     }
 

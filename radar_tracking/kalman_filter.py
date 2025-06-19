@@ -150,7 +150,10 @@ class RadarKalmanFilter:
                covariance: np.ndarray,
                measurement: Tuple[float, float],
                confidence: Optional[float] = None,
-               r_strategy: str = "squared") -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+               r_strategy: str = "squared",
+               strategy_params: dict = None,
+
+               ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Update state estimate with new measurement using confidence-weighted R.
 
@@ -172,7 +175,7 @@ class RadarKalmanFilter:
 
         # Get confidence-weighted R matrix
         if confidence is not None:
-            R_weighted = self.get_confidence_weighted_R(confidence, r_strategy)
+            R_weighted = self.get_confidence_weighted_R(confidence, r_strategy, strategy_params)
         else:
             R_weighted = self.R
 
@@ -223,30 +226,55 @@ class RadarKalmanFilter:
 
         return float(distance)
 
-    def get_confidence_weighted_R(self, confidence: float, strategy: str = "squared") -> np.ndarray:
+    def get_confidence_weighted_R(self, confidence: float, strategy: str = "squared",
+                                  strategy_params: dict = None) -> np.ndarray:
         """
         Get measurement noise covariance matrix weighted by detection confidence.
 
         Args:
             confidence: Detection confidence score (0.0 to 1.0)
             strategy: Weighting strategy ("squared", "linear", "stepped")
+            strategy_params: Parameters for the specific strategy
 
         Returns:
             Confidence-weighted R matrix
         """
+        # Default parameters if none provided
+        if strategy_params is None:
+            strategy_params = {}
+
+        # Clamp confidence to reasonable range
+        confidence_clamped = np.clip(confidence, 0.01, 1.0)
+
         if strategy == "squared":
             # R = R_base / conf^2 (lower confidence = higher noise)
-            # Clamp confidence to reasonable range to avoid extreme R values
-            confidence_clamped = np.clip(confidence, 0.05, 1.0)  # Min 5%, Max 100%
+            R_max_factor = strategy_params.get('r_max_factor', 100.0)
             confidence_factor = 1.0 / (confidence_clamped ** 2)
-            # Optional: Add upper bound to prevent extremely high noise
-            confidence_factor = min(confidence_factor, 100.0)  # Max 100x base noise
+            confidence_factor = min(confidence_factor, R_max_factor)
+
         elif strategy == "linear":
-            # Will implement later
-            confidence_factor = 1.0
+            # Linear scaling between R_min and R_max based on confidence
+            R_min_factor = strategy_params.get('r_min_factor', 0.5)  # High confidence
+            R_max_factor = strategy_params.get('r_max_factor', 10.0)  # Low confidence
+
+            # Linear interpolation: factor = R_max + (R_min - R_max) * confidence
+            confidence_factor = R_max_factor + (R_min_factor - R_max_factor) * confidence_clamped
+
         elif strategy == "stepped":
-            # Will implement later
-            confidence_factor = 1.0
+            # Stepped confidence levels with different factors
+            thresholds = strategy_params.get('thresholds', [0.9, 0.8, 0.7, 0.5, 0.3])
+            factors = strategy_params.get('factors', [0.25, 0.5, 1.0, 2.0, 5.0, 15.0])
+
+            # Ensure we have the right number of factors (one more than thresholds)
+            if len(factors) != len(thresholds) + 1:
+                raise ValueError(f"Need {len(thresholds) + 1} factors for {len(thresholds)} thresholds")
+
+            # Find appropriate factor based on confidence level
+            confidence_factor = factors[-1]  # Default to lowest confidence factor
+            for i, threshold in enumerate(thresholds):
+                if confidence_clamped >= threshold:
+                    confidence_factor = factors[i]
+                    break
         else:
             confidence_factor = 1.0
 
