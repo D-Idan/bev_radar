@@ -518,7 +518,7 @@ if __name__ == "__main__":
         'max_frame_gap_time': 2.0,  # Kill all tracks if frame gap > 2 seconds
 
         # ========== ASSOCIATION STRATEGY ==========
-        'association_strategy': 'confidence_weighted_r',  # Available: "distance_only", "confidence_weighted",
+        'association_strategy': 'mahalanobis_distance',  # Available: "distance_only", "confidence_weighted",
         # "confidence_gated", "hybrid_score", "mahalanobis_distance",
         # "confidence_weighted_r"
 
@@ -528,10 +528,10 @@ if __name__ == "__main__":
         'confidence_weight': 0.3,  # Weight factor for confidence in hybrid strategies
 
         # Confidence-based R matrix weighting
-        'r_weighting_strategy': 'squared',  # "squared", "linear", "stepped" - how to weight R by confidence
+        'r_weighting_strategy': 'linear',  # "squared", "linear", "stepped" - how to weight R by confidence
         'r_weighting_config' : {
-            'linear_r_min_factor': 0.3,    # High confidence: 30% of base R
-            'linear_r_max_factor': 15.0,   # Low confidence: 15x base R
+            'r_min_factor': 1.0,    # High confidence: 30% of base R
+            'r_max_factor': 1.0,   # Low confidence: 15x base R
             'stepped_r_thresholds': [0.95, 0.85, 0.75, 0.60, 0.40],  # Fine-grained for high conf
             'stepped_r_factors': [0.1, 0.3, 0.7, 1.5, 4.0, 20.0],   # Strong preference for high conf
         },
