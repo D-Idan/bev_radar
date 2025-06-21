@@ -551,8 +551,9 @@ class RadarTracker:
         if detection.confidence < self.min_confidence_assoc:
             return False
 
-        # For Mahalanobis, finite cost means it passed gating
-        if self.association_strategy == AssociationStrategy.MAHALANOBIS_DISTANCE:
+        # For Mahalanobis-based strategies, use chi-squared threshold
+        if self.association_strategy in [AssociationStrategy.MAHALANOBIS_DISTANCE,
+                                         AssociationStrategy.CONFIDENCE_WEIGHTED_R]:
             return cost <= self.default_chi2_threshold
 
         # Basic distance check
@@ -561,6 +562,7 @@ class RadarTracker:
             return cost <= 2.0  # Adjusted threshold for hybrid scoring
         else:
             # For other strategies, use distance threshold
+            print(f"Checking cost {cost:.2f} against distance threshold {distance_threshold:.2f}")
             return cost <= distance_threshold
 
     def _update_track(self, track: Track, detection: Detection, dt: float = None) -> Track:
