@@ -262,8 +262,8 @@ class RadarKalmanFilter:
 
         elif strategy == "stepped":
             # Stepped confidence levels with different factors
-            thresholds = strategy_params.get('thresholds', [0.9, 0.8, 0.7, 0.5, 0.3])
-            factors = strategy_params.get('factors', [0.25, 0.5, 1.0, 2.0, 5.0, 15.0])
+            thresholds = strategy_params.get('stepped_r_thresholds', [0.9, 0.8, 0.7, 0.5, 0.3])
+            factors = strategy_params.get('stepped_r_factors', [0.25, 0.5, 1.0, 2.0, 5.0, 15.0])
 
             # Ensure we have the right number of factors (one more than thresholds)
             if len(factors) != len(thresholds) + 1:
