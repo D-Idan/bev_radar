@@ -170,7 +170,7 @@ chi2_95 = 5.991  # 95% confidence for 2 DOF
 
 ## Adaptive R Matrix Weighting for Kalman Filter Update
 
-We have successfully implemented **confidence-based R matrix weighting** for the Kalman filter update step in our radar tracking system. This allows the tracker to dynamically adjust measurement trust based on detection confidence scores.
+We have successfully implemented **confidence-based R matrix weighting** with **independent control** for both association and Kalman filter update phases in our radar tracking system. This provides fine-grained control over how detection confidence affects measurement trust in different parts of the tracking pipeline.
 
 ### ✅ **Completed Features:**
 
@@ -179,20 +179,36 @@ We have successfully implemented **confidence-based R matrix weighting** for the
    - **Linear**: `R = R_base × linear_interpolation(R_min_factor, R_max_factor, conf)`
    - **Stepped**: `R = R_base × stepped_factors[conf_range]` (optimized for datasets with many high-confidence detections)
 
-2. **New Association Strategy:**
-   - `CONFIDENCE_WEIGHTED_R`: Uses standard Mahalanobis distance for association, applies confidence weighting only in update step
+2. **Independent Adaptive R Control:**
+   - `use_adaptive_r_in_association`: Controls confidence weighting in Mahalanobis distance gating
+   - `use_adaptive_r_in_update`: Controls confidence weighting in Kalman filter update
+   - Both flags can be enabled/disabled independently for maximum flexibility
 
-3. **Configurable Parameters:**
-   - Strategy selection and tuning parameters
-   - Separate min/max factors for linear strategy
-   - Customizable thresholds and factors for stepped strategy
+3. **Enhanced Gating Distance Calculation:**
+   - `gating_distance()` method now supports optional confidence-weighted R matrix
+   - Maintains backward compatibility with standard (unweighted) Mahalanobis distance
 
-### 🔄 **Current Behavior:**
-- **Association Phase**: Uses standard Mahalanobis distance (unweighted R)
-- **Update Phase**: Uses confidence-weighted R matrix when `confidence_weighted_r` strategy is selected
-- **Other Strategies**: Remain unchanged and fully functional
+4. **Unified Configuration System:**
+   - Single `r_weighting_config` shared between association and update phases
+   - Consistent strategy parameters across both usage contexts
+   - Clean separation of concerns with boolean control flags
 
-### ⚠️ **Important Note:**
-**The `self.kf.gating_distance()` method currently does NOT use the new confidence-weighted R matrix.** It still uses the base R matrix for Mahalanobis distance calculations during the association phase. The confidence weighting is only applied during the Kalman filter update step.
+### 🔄 **Current Behavior (4 Possible Configurations):**
 
-This design choice maintains consistent gating behavior while allowing confidence-based measurement trust adjustment in the state estimation process.
+| Association R | Update R | Use Case |
+|---------------|----------|----------|
+| Standard | Standard | **Original behavior** - no confidence weighting |
+| **Adaptive** | Standard | **Confidence-aware gating** - stricter/looser association based on confidence |
+| Standard | **Adaptive** | **Confidence-aware estimation** - measurement trust varies by confidence |
+| **Adaptive** | **Adaptive** | **Full adaptive** - confidence affects both association and state estimation |
+
+### 📋 **Configuration Examples:**
+
+```python
+# Configuration 1: No adaptive R (original behavior)
+config = {
+    'association_strategy': 'mahalanobis_distance',
+    'use_adaptive_r_in_association': False,
+    'use_adaptive_r_in_update': False,
+}
+```
