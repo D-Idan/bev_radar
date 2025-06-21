@@ -197,7 +197,10 @@ class RadarKalmanFilter:
     def gating_distance(self,
                         state: np.ndarray,
                         covariance: np.ndarray,
-                        measurement: Tuple[float, float]) -> float:
+                        measurement: Tuple[float, float],
+                        confidence: Optional[float] = None,
+                        r_strategy: str = "squared",
+                        strategy_params: dict = None) -> float:
         """
         Calculate Mahalanobis distance for gating.
 
@@ -205,6 +208,9 @@ class RadarKalmanFilter:
             state: State vector
             covariance: State covariance matrix
             measurement: Measurement (x, y)
+            confidence: Detection confidence for R weighting (optional)
+            r_strategy: Strategy for R weighting ("squared", "linear", "stepped")
+            strategy_params: Parameters for the specific strategy
 
         Returns:
             Mahalanobis distance
@@ -218,8 +224,14 @@ class RadarKalmanFilter:
         # Innovation
         innovation = z - z_pred
 
+        # Get appropriate R matrix (adaptive or standard)
+        if confidence is not None:
+            R_matrix = self.get_confidence_weighted_R(confidence, r_strategy, strategy_params)
+        else:
+            R_matrix = self.R
+
         # Innovation covariance
-        innovation_cov = self.H @ covariance @ self.H.T + self.R
+        innovation_cov = self.H @ covariance @ self.H.T + R_matrix
 
         # Mahalanobis distance
         distance = innovation.T @ np.linalg.inv(innovation_cov) @ innovation

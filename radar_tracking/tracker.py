@@ -20,7 +20,6 @@ class AssociationStrategy(Enum):
     CONFIDENCE_GATED = "confidence_gated"
     HYBRID_SCORE = "hybrid_score"
     MAHALANOBIS_DISTANCE = "mahalanobis_distance"
-    CONFIDENCE_WEIGHTED_R = "confidence_weighted_r"
 
 class RadarTracker:
     """
@@ -100,6 +99,8 @@ class RadarTracker:
         association_strategy = config['association_strategy']
         self.r_weighting_strategy = config['r_weighting_strategy']
         self.r_weighting_config = config['r_weighting_config']
+        self.use_adaptive_r_in_association = config['use_adaptive_r_in_association']
+        self.use_adaptive_r_in_update = config['use_adaptive_r_in_update']
 
         # Range culling parameters
         self.enable_range_culling = config['enable_range_culling']
@@ -493,17 +494,26 @@ class RadarTracker:
                         cost_matrix[t, d] = distance
 
 
-                elif self.association_strategy in [AssociationStrategy.MAHALANOBIS_DISTANCE,
-                                                   AssociationStrategy.CONFIDENCE_WEIGHTED_R]:
+                elif self.association_strategy in [AssociationStrategy.MAHALANOBIS_DISTANCE]:
                     # The confidence weighting happens in the update step
-                    # Use standard Mahalanobis distance for association
                     pred_state = track.predicted_state if track.predicted_state is not None else track.state
                     pred_covariance = track.predicted_covariance if track.predicted_covariance is not None else track.covariance
 
-                    # Calculate Mahalanobis distance using prediction
-                    mahal_dist = self.kf.gating_distance(
-                        pred_state, pred_covariance, det_pos
-                    )
+                    # Use adaptive R in association if enabled
+                    if self.use_adaptive_r_in_association:
+                        mahal_dist = self.kf.gating_distance(
+                            pred_state, pred_covariance, det_pos,
+                            confidence=detection.confidence,
+                            r_strategy=self.r_weighting_strategy,
+                            strategy_params=self.r_weighting_config
+                        )
+                    else:
+                        # Standard Mahalanobis without confidence weighting
+                        mahal_dist = self.kf.gating_distance(
+                            pred_state, pred_covariance, det_pos
+                            # No confidence parameters
+                        )
+
                     cost_matrix[t, d] = mahal_dist
 
                 elif self.association_strategy == AssociationStrategy.HYBRID_SCORE:
@@ -552,8 +562,7 @@ class RadarTracker:
             return False
 
         # For Mahalanobis-based strategies, use chi-squared threshold
-        if self.association_strategy in [AssociationStrategy.MAHALANOBIS_DISTANCE,
-                                         AssociationStrategy.CONFIDENCE_WEIGHTED_R]:
+        if self.association_strategy in [AssociationStrategy.MAHALANOBIS_DISTANCE]:
             return cost <= self.default_chi2_threshold
 
         # Basic distance check
@@ -614,15 +623,17 @@ class RadarTracker:
             pred_state, pred_covariance = self.kf.predict(track.state, track.covariance, dt)
 
         # Perform update step WITH confidence information
-        if self.association_strategy == AssociationStrategy.CONFIDENCE_WEIGHTED_R:
+        # Determine whether to use adaptive R in Kalman update
+        if self.use_adaptive_r_in_update:
+            # Use adaptive R in Kalman filter update
             updated_state, updated_covariance, innovation = self.kf.update(
                 pred_state, pred_covariance, detection.cartesian_pos,
                 confidence=detection.confidence,
-                r_strategy=getattr(self, 'r_weighting_strategy'),
-                strategy_params=getattr(self, 'r_weighting_config'),
+                r_strategy=self.r_weighting_strategy,
+                strategy_params=self.r_weighting_config,
             )
         else:
-            # Standard update without confidence weighting
+            # Standard Kalman update without confidence weighting
             updated_state, updated_covariance, innovation = self.kf.update(
                 pred_state, pred_covariance, detection.cartesian_pos
             )

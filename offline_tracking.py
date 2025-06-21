@@ -520,7 +520,6 @@ if __name__ == "__main__":
         # ========== ASSOCIATION STRATEGY ==========
         'association_strategy': 'mahalanobis_distance',  # Available: "distance_only", "confidence_weighted",
         # "confidence_gated", "hybrid_score", "mahalanobis_distance",
-        # "confidence_weighted_r"
 
         # ========== CONFIDENCE-BASED PARAMETERS ==========
         'min_confidence_init': 0.5,  # Minimum confidence to create new tracks
@@ -528,10 +527,16 @@ if __name__ == "__main__":
         'confidence_weight': 0.3,  # Weight factor for confidence in hybrid strategies
 
         # Confidence-based R matrix weighting
+
+        ## Separate controls for adaptive R usage
+        'use_adaptive_r_in_association': False,   # Control Mahalanobis distance calculation
+        'use_adaptive_r_in_update': False,        # Control Kalman filter update
+
+        ## Shared R weighting configuration
         'r_weighting_strategy': 'linear',  # "squared", "linear", "stepped" - how to weight R by confidence
         'r_weighting_config' : {
-            'r_min_factor': 1.0,    # High confidence: 30% of base R
-            'r_max_factor': 1.0,   # Low confidence: 15x base R
+            'r_min_factor': 0.3,    # High confidence: 30% of base R
+            'r_max_factor': 15.0,   # Low confidence: 15x base R
             'stepped_r_thresholds': [0.95, 0.85, 0.75, 0.60, 0.40],  # Fine-grained for high conf
             'stepped_r_factors': [0.1, 0.3, 0.7, 1.5, 4.0, 20.0],   # Strong preference for high conf
         },
