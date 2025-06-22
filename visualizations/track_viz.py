@@ -504,7 +504,7 @@ def visualize_avg_confidence_over_time(
                 fontsize=8, verticalalignment='top')
 
     # Set x-label on bottom subplot
-    if track_axes.any():
+    if np.any(track_axes):
         track_axes[-1].set_xlabel('Time (seconds)', fontsize=12)
     else:
         main_ax.set_xlabel('Time (seconds)', fontsize=12)
