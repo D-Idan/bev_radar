@@ -8,9 +8,9 @@
 # =============================================================================
 tracking:
   # Processing options
-  create_video: true
+  create_video: false # Create video output
   max_video_samples: 50  # null = no limit, integer = limit samples
-  max_frames: 50  # null = all frames, integer = limit for debugging
+  max_frames: null  # null = all frames, integer = limit for debugging
 
   # Track lifecycle parameters
   lifecycle:
