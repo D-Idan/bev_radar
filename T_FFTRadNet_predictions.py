@@ -15,7 +15,7 @@ import cv2
 
 from utils.save_model_outputs import batch_save_predictions
 
-def main(config, checkpoint_filename,difficult):
+def main(config, checkpoint_filename, difficult, output_dir=None):
     import torch
     # set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -72,7 +72,6 @@ def main(config, checkpoint_filename,difficult):
     model_outputs_dict = {}
     ### $$$$$$$###### $$$$$$$###### $$$$$$$###### $$$$$$$###### $$$$$$$###
 
-
     for data in tqdm(dataset, desc="Processing samples", unit="sample"):
         # data is composed of [radar_FFT, segmap,out_label,box_labels,image]
         inputs = torch.tensor(data[0]).permute(2,0,1).to(device).unsqueeze(0)
@@ -80,15 +79,17 @@ def main(config, checkpoint_filename,difficult):
             outputs = net(inputs)
             if config['data_mode'] == 'ADC':
                 intermediate = net.DFT(inputs).detach().cpu().numpy()[0]
-
             else:
                 intermediate = None
 
         if data[4] is not None: # there is image
-
             model_outputs_dict[data[5]] = outputs
 
-    batch_save_predictions(model_outputs_dict, enc, "plots/predictions/")
+    # Use custom output directory if provided
+    predictions_output_dir = output_dir if output_dir else "plots/predictions/"
+    if predictions_output_dir and not predictions_output_dir.endswith('/'):
+        predictions_output_dir += '/'
+    batch_save_predictions(model_outputs_dict, enc, predictions_output_dir)
     cv2.destroyAllWindows()
 
 
