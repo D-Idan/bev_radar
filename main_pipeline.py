@@ -408,16 +408,16 @@ class RadarProcessingPipeline:
         return results
 
     def _generate_configuration_comparison_report(self, target_value: str, config_results: Dict[str, bool]):
-        """Generate comparison report across all tracking configurations."""
+        """Generate comparison report across all tracking configurations vs raw predictions baseline."""
         try:
             dataset_root = self.output_base / target_value
 
-            # Use the comparison analyzer
+            # Use the comparison analyzer with raw predictions as baseline
             comparison = self.comparison_analyzer.compare_configurations(
                 dataset_name=target_value,
                 config_results=config_results,
                 dataset_root=dataset_root,
-                baseline_config=self.config_manager.get_baseline_config()
+                baseline_config='raw_predictions'  # Always use raw predictions as baseline
             )
 
             # Save the comparison report
@@ -425,9 +425,11 @@ class RadarProcessingPipeline:
             self.comparison_analyzer.save_comparison_report(comparison, comparison_output_dir)
 
             print(f"    Configuration comparison report saved to: {comparison_output_dir}")
+            print(f"    Baseline: Raw network predictions (detection performance)")
 
         except Exception as e:
             print(f"    Failed to generate comparison report: {e}")
+            traceback.print_exc()
 
     def process_dataset(self, target_value: str, skip_existing: bool = True,
                        specific_configs: Optional[List[str]] = None) -> bool:

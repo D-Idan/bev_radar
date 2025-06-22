@@ -8,8 +8,8 @@
 # =============================================================================
 tracking:
   # Processing options
-  create_video: false # Create video output
-  max_video_samples: 50  # null = no limit, integer = limit samples
+  create_video: true # Create video output
+  max_video_samples: null  # null = no limit, integer = limit samples
   max_frames: null  # null = all frames, integer = limit for debugging
 
   # Track lifecycle parameters
@@ -22,8 +22,8 @@ tracking:
   timing:
     base_dt: 0.2  # 200ms base time step
     max_dt_gap: 1.0  # Trigger multi-step prediction for gaps > 1.0s
-    max_time_without_update: 1.0  # Kill tracks after 1 second without update
-    max_frame_gap_time: 2.0  # Kill all tracks if frame gap > 2 seconds
+    max_time_without_update: 2.0  # Kill tracks after 1 second without update
+    max_frame_gap_time: 4.0  # Kill all tracks if frame gap > 2 seconds
 
   # Association strategy and confidence parameters
   association:
