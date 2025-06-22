@@ -377,7 +377,8 @@ class RadarProcessingPipeline:
         print("-" * 50)
 
         # Step 1: Data Extraction
-        if skip_existing and self.check_step_completed('extraction', target_value):
+        # if skip_existing and self.check_step_completed('extraction', target_value):
+        if self.check_step_completed('extraction', target_value):
             print("  Data extraction already completed, skipping...")
         else:
             if not self.run_extraction(target_value):
@@ -385,7 +386,8 @@ class RadarProcessingPipeline:
                 return False
 
         # Step 2: Model Prediction
-        if skip_existing and self.check_step_completed('prediction', target_value):
+        # if skip_existing and self.check_step_completed('prediction', target_value):
+        if self.check_step_completed('prediction', target_value):
             print("  Model prediction already completed, skipping...")
         else:
             if not self.run_prediction(target_value):
