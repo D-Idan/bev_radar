@@ -41,12 +41,12 @@ def extract_all(config):
     # Load configuration
     cal_table = config['Calibration']
     labels_df = pd.read_csv(config['label_path'], sep=',')
-    output_dir = Path(config['Output_Folder']).parent
+    output_dir = Path(config['Output_Folder'])
     record = config['target_value']
     root_folder = Path(config['Data_Dir'], record)
 
     # Prepare output folder structure
-    base = os.path.join(output_dir, 'RadIal_Data', record)
+    base = os.path.join(output_dir, record)
     subdirs = [
         'ADC_Data', 'camera', 'laser_PCL',
         'radar_FFT', 'radar_Freespace', 'radar_PCL', 'radar_RD', 'radar_RA',
