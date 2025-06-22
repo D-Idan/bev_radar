@@ -1,9 +1,10 @@
 # Tracking Configuration Variations
+# Baseline is the raw network predictions (no tracking)
 # Each configuration defines overrides to apply to the base tracker config
 
 configurations:
-  baseline:
-    description: "Baseline configuration without adaptive R matrix"
+  baseline_tracking:
+    description: "Basic tracking configuration"
     overrides:
       use_adaptive_r_in_association: false
       use_adaptive_r_in_update: false
@@ -42,11 +43,11 @@ configurations:
 
 # Default configurations to run (when no specific configs are requested)
 default_configurations:
-  - baseline
+  - baseline_tracking
   - adaptive_assoc_linear
   - adaptive_assoc_stepped
   - adaptive_assoc_squared
 #  - # experimental_high_confidence
 
-# Baseline configuration for comparisons
-baseline_config: "baseline"
+# Baseline is raw predictions (not a tracking configuration)
+baseline_config: "raw_predictions"

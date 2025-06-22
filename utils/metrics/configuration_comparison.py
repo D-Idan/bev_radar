@@ -25,7 +25,7 @@ class ConfigurationComparison:
 
 
 class ConfigurationComparisonAnalyzer:
-    """Analyzes and compares multiple tracking configurations."""
+    """Analyzes and compares multiple tracking configurations against raw predictions baseline."""
 
     def __init__(self, key_metrics: Optional[List[str]] = None):
         """Initialize analyzer."""
@@ -34,31 +34,35 @@ class ConfigurationComparisonAnalyzer:
             'mean_euclidean_distance', 'motp'
         ]
         self.distance_metrics = ['mean_euclidean_distance', 'motp']
-
-        # Add IoU metrics to track
-        self.iou_metrics = [
-            'detection_camera_iou_mean', 'tracking_camera_iou_mean'
-        ]
+        self.iou_metrics = ['camera_iou_mean']
 
     def compare_configurations(self, dataset_name: str, config_results: Dict[str, bool],
-                               dataset_root: Path, baseline_config: str = 'baseline') -> ConfigurationComparison:
+                               dataset_root: Path, baseline_config: str = 'raw_predictions') -> ConfigurationComparison:
         """
-        Compare tracking configurations for a dataset.
+        Compare tracking configurations against raw predictions baseline.
 
         Args:
             dataset_name: Name of the dataset
             config_results: Dictionary of configuration success status
             dataset_root: Root directory for the dataset
-            baseline_config: Name of baseline configuration
+            baseline_config: Should be 'raw_predictions' for true baseline
 
         Returns:
             ConfigurationComparison object with analysis results
         """
-        # Collect metrics from successful configurations
+        # Collect metrics from successful tracking configurations
         config_metrics = self._collect_configuration_metrics(config_results, dataset_root)
+
+        # Add raw predictions as baseline
+        raw_predictions_metrics = self._collect_raw_predictions_baseline(dataset_root)
+        if raw_predictions_metrics:
+            config_metrics['raw_predictions'] = raw_predictions_metrics
 
         if not config_metrics:
             raise ValueError("No successful configurations found for comparison")
+
+        # Use raw predictions as baseline
+        baseline_config = 'raw_predictions'
 
         # Perform comparison analysis
         metrics_comparison = self._analyze_metrics_comparison(config_metrics, baseline_config)
@@ -76,6 +80,32 @@ class ConfigurationComparisonAnalyzer:
             best_config=overall_ranking[0][0] if overall_ranking else None,
             improvement_summary=improvement_summary
         )
+
+    def _collect_raw_predictions_baseline(self, dataset_root: Path) -> Optional[Dict]:
+        """Collect metrics from raw predictions (detection performance)."""
+        # Look for evaluation metrics from any tracking configuration
+        # (they all evaluate the same raw predictions)
+        for config_dir in (dataset_root / 'plots' / 'tracking_output').iterdir():
+            if config_dir.is_dir():
+                metrics_file = config_dir / 'logs' / 'evaluation_metrics_summary.json'
+                if metrics_file.exists():
+                    with open(metrics_file, 'r') as f:
+                        full_metrics = json.load(f)
+
+                    # Extract detection performance as baseline
+                    detection_perf = full_metrics.get('detection_performance', {})
+                    camera_iou = full_metrics.get('camera_iou_performance', {})
+
+                    # Create baseline metrics structure
+                    baseline_metrics = {
+                        'evaluation_summary': full_metrics.get('evaluation_summary', {}),
+                        'detection_performance': detection_perf,  # This becomes our baseline
+                        'tracking_performance': detection_perf,  # Same as detection for baseline
+                        'camera_iou_performance': camera_iou
+                    }
+                    return baseline_metrics
+
+        return None
 
     def _collect_configuration_metrics(self, config_results: Dict[str, bool],
                                        dataset_root: Path) -> Dict[str, Dict]:
@@ -97,9 +127,11 @@ class ConfigurationComparisonAnalyzer:
 
     def _analyze_metrics_comparison(self, config_metrics: Dict[str, Dict],
                                     baseline_config: str) -> Dict[str, Dict]:
-        """Analyze metrics comparison between configurations."""
+        """Analyze metrics comparison between tracking configs and raw predictions baseline."""
         comparison = {}
-        baseline_metrics = config_metrics.get(baseline_config, {}).get('tracking_performance', {})
+
+        # Get baseline metrics (raw predictions = detection performance)
+        baseline_metrics = config_metrics.get(baseline_config, {}).get('detection_performance', {})
         baseline_iou = config_metrics.get(baseline_config, {}).get('camera_iou_performance', {})
 
         # Process standard metrics
@@ -107,8 +139,14 @@ class ConfigurationComparisonAnalyzer:
             comparison[metric] = {}
 
             for config_name, metrics in config_metrics.items():
-                tracking_perf = metrics.get('tracking_performance', {})
-                metric_value = tracking_perf.get(metric, 0.0)
+                if config_name == baseline_config:
+                    # For baseline, use detection performance
+                    performance_data = metrics.get('detection_performance', {})
+                else:
+                    # For tracking configs, use tracking performance
+                    performance_data = metrics.get('tracking_performance', {})
+
+                metric_value = performance_data.get(metric, 0.0)
 
                 if metric_value == float('inf'):
                     metric_value = None
@@ -118,8 +156,8 @@ class ConfigurationComparisonAnalyzer:
                     'improvement_vs_baseline': None
                 }
 
-                # Calculate improvement vs baseline
-                if baseline_metrics and metric in baseline_metrics and metric_value is not None:
+                # Calculate improvement vs baseline (skip for baseline itself)
+                if config_name != baseline_config and baseline_metrics and metric in baseline_metrics and metric_value is not None:
                     baseline_value = baseline_metrics[metric]
                     if baseline_value != 0 and baseline_value != float('inf'):
                         if metric in self.distance_metrics:  # Lower is better
@@ -128,41 +166,36 @@ class ConfigurationComparisonAnalyzer:
                             improvement = ((metric_value - baseline_value) / baseline_value) * 100
                         comparison[metric][config_name]['improvement_vs_baseline'] = improvement
 
-        # Process IoU metrics
-        for iou_metric in self.iou_metrics:
-            comparison[iou_metric] = {}
+        # Process single IoU metric
+        comparison['camera_iou_mean'] = {}
 
-            for config_name, metrics in config_metrics.items():
-                camera_iou = metrics.get('camera_iou_performance', {})
+        for config_name, metrics in config_metrics.items():
+            camera_iou = metrics.get('camera_iou_performance', {})
 
-                if iou_metric == 'detection_camera_iou_mean':
-                    metric_value = camera_iou.get('detection_camera_iou', {}).get('mean', 0.0)
-                elif iou_metric == 'tracking_camera_iou_mean':
-                    metric_value = camera_iou.get('tracking_camera_iou', {}).get('mean', 0.0)
-                else:
-                    metric_value = 0.0
+            if config_name == baseline_config:
+                # For raw predictions: use detection IoU
+                metric_value = camera_iou.get('detection_camera_iou', {}).get('mean', 0.0)
+            else:
+                # For tracking configs: use tracking IoU
+                metric_value = camera_iou.get('tracking_camera_iou', {}).get('mean', 0.0)
 
-                comparison[iou_metric][config_name] = {
-                    'value': metric_value,
-                    'improvement_vs_baseline': None
-                }
+            comparison['camera_iou_mean'][config_name] = {
+                'value': metric_value,
+                'improvement_vs_baseline': None
+            }
 
-                # Calculate improvement vs baseline
-                if iou_metric == 'detection_camera_iou_mean':
-                    baseline_value = baseline_iou.get('detection_camera_iou', {}).get('mean', 0.0)
-                elif iou_metric == 'tracking_camera_iou_mean':
-                    baseline_value = baseline_iou.get('tracking_camera_iou', {}).get('mean', 0.0)
-                else:
-                    baseline_value = 0.0
+            # Calculate improvement vs baseline
+            if config_name != baseline_config:
+                baseline_value = baseline_iou.get('detection_camera_iou', {}).get('mean', 0.0)
 
                 if baseline_value > 0 and metric_value > 0:
                     improvement = ((metric_value - baseline_value) / baseline_value) * 100
-                    comparison[iou_metric][config_name]['improvement_vs_baseline'] = improvement
+                    comparison['camera_iou_mean'][config_name]['improvement_vs_baseline'] = improvement
 
         return comparison
 
     def _rank_configurations(self, config_metrics: Dict[str, Dict]) -> Dict[str, List[str]]:
-        """Rank configurations for each metric."""
+        """Rank configurations for each metric (including raw predictions baseline)."""
         ranking = {}
 
         # Process standard metrics
@@ -170,8 +203,14 @@ class ConfigurationComparisonAnalyzer:
             metric_values = []
 
             for config_name, metrics in config_metrics.items():
-                tracking_perf = metrics.get('tracking_performance', {})
-                metric_value = tracking_perf.get(metric, 0.0)
+                if config_name == 'raw_predictions':
+                    # For baseline, use detection performance
+                    performance_data = metrics.get('detection_performance', {})
+                else:
+                    # For tracking configs, use tracking performance
+                    performance_data = metrics.get('tracking_performance', {})
+
+                metric_value = performance_data.get(metric, 0.0)
 
                 if metric_value != float('inf') and metric_value is not None:
                     metric_values.append((config_name, metric_value))
@@ -184,27 +223,24 @@ class ConfigurationComparisonAnalyzer:
 
                 ranking[metric] = [config_name for config_name, _ in ranked]
 
-        # Process IoU metrics
-        for iou_metric in self.iou_metrics:
-            metric_values = []
+        # Process single IoU metric
+        metric_values = []
 
-            for config_name, metrics in config_metrics.items():
-                camera_iou = metrics.get('camera_iou_performance', {})
+        for config_name, metrics in config_metrics.items():
+            camera_iou = metrics.get('camera_iou_performance', {})
 
-                if iou_metric == 'detection_camera_iou_mean':
-                    metric_value = camera_iou.get('detection_camera_iou', {}).get('mean', 0.0)
-                elif iou_metric == 'tracking_camera_iou_mean':
-                    metric_value = camera_iou.get('tracking_camera_iou', {}).get('mean', 0.0)
-                else:
-                    metric_value = 0.0
+            if config_name == 'raw_predictions':
+                metric_value = camera_iou.get('detection_camera_iou', {}).get('mean', 0.0)
+            else:
+                metric_value = camera_iou.get('tracking_camera_iou', {}).get('mean', 0.0)
 
-                if metric_value > 0:
-                    metric_values.append((config_name, metric_value))
+            if metric_value > 0:
+                metric_values.append((config_name, metric_value))
 
-            if metric_values:
-                # Higher IoU is better
-                ranked = sorted(metric_values, key=lambda x: x[1], reverse=True)
-                ranking[iou_metric] = [config_name for config_name, _ in ranked]
+        if metric_values:
+            # Higher IoU is better
+            ranked = sorted(metric_values, key=lambda x: x[1], reverse=True)
+            ranking['camera_iou_mean'] = [config_name for config_name, _ in ranked]
 
         return ranking
 
