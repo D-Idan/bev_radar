@@ -212,3 +212,34 @@ config = {
     'use_adaptive_r_in_update': False,
 }
 ```
+
+# Multi-Configuration Tracking System Files
+
+## **New Files Created**
+
+### **Configuration Management**
+- **`config/tracking_configurations.yaml`** - Defines tracking configuration variations (baseline, adaptive R settings)
+- **`config/__init__.py`** - Package initialization
+- **`config/tracking_configuration_manager.py`** - Loads YAML configs, generates configuration variations, validates requests
+
+### **Analysis & Reporting**
+- **`utils/metrics/configuration_comparison.py`** - Compares configurations within a single dataset, ranks performance, calculates improvements vs baseline
+- **`utils/reports/__init__.py`** - Package initialization  
+- **`utils/reports/aggregate_analysis.py`** - Aggregates analysis across multiple datasets, identifies best configurations globally
+
+## **Modified Files**
+- **`main_pipeline.py`** - Updated to run multiple tracking configurations, generate comparison reports, integrate new components
+
+## **System Flow**
+1. **YAML Config** → defines configuration variations
+2. **Configuration Manager** → generates multiple tracking configs  
+3. **Main Pipeline** → runs each config, calls comparison analysis
+4. **Configuration Comparison** → analyzes single dataset results
+5. **Aggregate Analysis** → combines results across all datasets
+
+## **Key Features**
+- ✅ **Configurable via YAML** - Easy to add new configurations
+- ✅ **Separate outputs** - Each configuration gets its own directory
+- ✅ **Comprehensive metrics** - Precision, recall, F1, DetA, distance, IoU
+- ✅ **Flexible execution** - Run specific configs or defaults
+- ✅ **Detailed reporting** - Per-dataset + aggregate analysis

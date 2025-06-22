@@ -4,7 +4,7 @@ Main pipeline script for radar data processing, prediction, and tracking.
 This script orchestrates three main steps:
 1. Raw data extraction
 2. Model prediction
-3. Tracking
+3. Tracking (with multiple configurations)
 
 All steps use direct function calls instead of subprocess calls for better integration.
 """
@@ -14,6 +14,7 @@ import sys
 import json
 import argparse
 import yaml
+import copy
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import numpy as np
@@ -45,6 +46,9 @@ setup_python_path()
 # Now import our modules
 from ADCProcessing.raw_data_extractor_all import extract_all
 from offline_tracking import offline_tracking
+from config.tracking_configuration_manager import TrackingConfigurationManager
+from utils.metrics.configuration_comparison import ConfigurationComparisonAnalyzer
+from utils.reports.aggregate_analysis import AggregateAnalysisGenerator
 
 
 class RadarProcessingPipeline:
@@ -91,6 +95,11 @@ class RadarProcessingPipeline:
         self.data_dir = Path(self.config['paths']['data_dir'])
         self.output_base = Path(self.config['paths']['output_base'])
         self.model_path = Path(self.config['paths']['model_path'])
+
+        # Initialize new components
+        self.config_manager = TrackingConfigurationManager()
+        self.comparison_analyzer = ConfigurationComparisonAnalyzer()
+        self.aggregate_analyzer = AggregateAnalysisGenerator()
 
     def _validate_paths(self):
         """Validate that required paths exist."""
@@ -142,9 +151,17 @@ class RadarProcessingPipeline:
             return pred_file.exists()
 
         elif step == 'tracking':
-            # Check if tracking completed
-            tracking_file = dataset_output_dir / 'plots' / 'tracking_output' / 'tracks' / 'tracking.csv'
-            return tracking_file.exists()
+            # Check if any tracking configuration completed
+            tracking_base = dataset_output_dir / 'plots' / 'tracking_output'
+            if not tracking_base.exists():
+                return False
+            # Check if any configuration directory exists with tracking.csv
+            for config_dir in tracking_base.iterdir():
+                if config_dir.is_dir():
+                    tracking_file = config_dir / 'tracks' / 'tracking.csv'
+                    if tracking_file.exists():
+                        return True
+            return False
 
         return False
 
@@ -322,62 +339,110 @@ class RadarProcessingPipeline:
             traceback.print_exc()
             return False
 
-    def run_tracking(self, target_value: str) -> bool:
+    def run_tracking(self, target_value: str, specific_configs: Optional[List[str]] = None) -> Dict[str, bool]:
         """
-        Run the offline tracking step using direct function call.
+        Run offline tracking with multiple configurations.
 
         Args:
-            target_value: Dataset name to process
+            target_value: Dataset name
+            specific_configs: List of specific configurations to run (None = default configs)
 
         Returns:
-            True if successful, False otherwise
+            Dictionary mapping configuration names to success status
         """
         print(f"  Running offline tracking for {target_value}...")
 
+        # Generate base configuration
+        base_config = self._create_tracking_config(target_value)
+
+        # Generate requested tracking configurations
         try:
-            # Create tracking config
-            tracking_config = self._create_tracking_config(target_value)
+            configurations = self.config_manager.generate_configurations(
+                base_config, self.output_base, target_value, specific_configs
+            )
+        except ValueError as e:
+            print(f"    Configuration error: {e}")
+            return {}
 
-            # Verify input files exist
-            predictions_csv = Path(tracking_config['preds_csv'])
-            labels_csv = Path(tracking_config['labels_csv'])
+        print(f"    Running {len(configurations)} configuration(s): {list(configurations.keys())}")
 
-            if not predictions_csv.exists():
-                print(f"    Predictions file not found: {predictions_csv}")
-                return False
+        results = {}
 
-            if not labels_csv.exists():
-                print(f"    Labels file not found: {labels_csv}")
-                return False
+        for config_name, tracking_config in configurations.items():
+            print(f"    Running configuration: {config_name}")
+            print(f"      Description: {tracking_config['config_metadata']['description']}")
 
-            # Call tracking function directly
-            offline_tracking(**tracking_config)
+            try:
+                # Verify input files exist
+                predictions_csv = Path(tracking_config['preds_csv'])
+                labels_csv = Path(tracking_config['labels_csv'])
 
-            print(f"    Tracking completed successfully")
-            return True
+                if not predictions_csv.exists():
+                    print(f"      Predictions file not found: {predictions_csv}")
+                    results[config_name] = False
+                    continue
+
+                if not labels_csv.exists():
+                    print(f"      Labels file not found: {labels_csv}")
+                    results[config_name] = False
+                    continue
+
+                # Remove metadata before calling offline_tracking (it's not a valid parameter)
+                tracking_config_clean = {k: v for k, v in tracking_config.items() if k != 'config_metadata'}
+
+                # Call tracking function directly
+                offline_tracking(**tracking_config_clean)
+                print(f"      ✓ Configuration {config_name} completed successfully")
+                results[config_name] = True
+
+            except Exception as e:
+                print(f"      ✗ Configuration {config_name} failed: {e}")
+                results[config_name] = False
+
+        # Generate comparison report after all configurations complete
+        if any(results.values()) and len(results) > 1:
+            self._generate_configuration_comparison_report(target_value, results)
+        elif len(results) == 1:
+            print("    Single configuration run - skipping comparison report")
+
+        return results
+
+    def _generate_configuration_comparison_report(self, target_value: str, config_results: Dict[str, bool]):
+        """Generate comparison report across all tracking configurations."""
+        try:
+            dataset_root = self.output_base / target_value
+
+            # Use the comparison analyzer
+            comparison = self.comparison_analyzer.compare_configurations(
+                dataset_name=target_value,
+                config_results=config_results,
+                dataset_root=dataset_root,
+                baseline_config=self.config_manager.get_baseline_config()
+            )
+
+            # Save the comparison report
+            comparison_output_dir = dataset_root / 'plots' / 'configuration_comparison'
+            self.comparison_analyzer.save_comparison_report(comparison, comparison_output_dir)
+
+            print(f"    Configuration comparison report saved to: {comparison_output_dir}")
 
         except Exception as e:
-            print(f"    Tracking failed: {e}")
-            print("    Full traceback:")
-            traceback.print_exc()  # This will show the full traceback
-            return False
+            print(f"    Failed to generate comparison report: {e}")
 
-    def process_dataset(self, target_value: str, skip_existing: bool = True) -> bool:
+    def process_dataset(self, target_value: str, skip_existing: bool = True,
+                       specific_configs: Optional[List[str]] = None) -> bool:
         """
         Process a single dataset through the entire pipeline.
 
         Args:
-            target_value: Dataset name to process
+            target_value: Dataset name
             skip_existing: If True, skip steps that are already completed
-
-        Returns:
-            True if all steps completed successfully, False otherwise
+            specific_configs: List of specific tracking configurations to run
         """
         print(f"\nProcessing dataset: {target_value}")
         print("-" * 50)
 
         # Step 1: Data Extraction
-        # if skip_existing and self.check_step_completed('extraction', target_value):
         if self.check_step_completed('extraction', target_value):
             print("  Data extraction already completed, skipping...")
         else:
@@ -386,7 +451,6 @@ class RadarProcessingPipeline:
                 return False
 
         # Step 2: Model Prediction
-        # if skip_existing and self.check_step_completed('prediction', target_value):
         if self.check_step_completed('prediction', target_value):
             print("  Model prediction already completed, skipping...")
         else:
@@ -394,25 +458,34 @@ class RadarProcessingPipeline:
                 print(f"  Failed to run prediction for {target_value}")
                 return False
 
-        # Step 3: Offline Tracking
+        # Step 3: Multiple Tracking Configurations
         if skip_existing and self.check_step_completed('tracking', target_value):
             print("  Offline tracking already completed, skipping...")
+            return True
         else:
-            if not self.run_tracking(target_value):
-                print(f"  Failed to run tracking for {target_value}")
+            tracking_results = self.run_tracking(target_value, specific_configs)
+
+            # Check if at least one configuration succeeded
+            if not any(tracking_results.values()):
+                print(f"  All tracking configurations failed for {target_value}")
                 return False
 
-        print(f"  ✓ All steps completed successfully for {target_value}")
-        return True
+            successful_configs = sum(tracking_results.values())
+            total_configs = len(tracking_results)
+            print(f"  ✓ Tracking completed: {successful_configs}/{total_configs} configurations successful")
+
+            return True
 
     def run_pipeline(self, target_datasets: Optional[List[str]] = None,
-                     skip_existing: bool = True) -> None:
+                     skip_existing: bool = True,
+                     specific_configs: Optional[List[str]] = None) -> None:
         """
-        Run the complete pipeline for specified datasets or all available datasets.
+        Run the complete pipeline for specified datasets.
 
         Args:
             target_datasets: List of specific datasets to process, or None for all
             skip_existing: If True, skip steps that are already completed
+            specific_configs: List of specific tracking configurations to run
         """
         # Discover available datasets
         available_datasets = self.discover_datasets()
@@ -442,15 +515,26 @@ class RadarProcessingPipeline:
             print("No valid datasets to process.")
             return
 
+        # Print configuration info if specific configs requested
+        if specific_configs:
+            print(f"\nUsing specific tracking configurations: {specific_configs}")
+        else:
+            default_configs = self.config_manager.get_default_configurations()
+            print(f"\nUsing default tracking configurations: {default_configs}")
+
         # Process each dataset
         successful = 0
         failed = 0
 
         for dataset in datasets_to_process:
-            if self.process_dataset(dataset, skip_existing):
+            if self.process_dataset(dataset, skip_existing, specific_configs):
                 successful += 1
             else:
                 failed += 1
+
+        # Generate aggregate analysis across all datasets (only if multiple configs)
+        if successful > 0 and (specific_configs is None or len(specific_configs) > 1):
+            self.aggregate_analyzer.generate_aggregate_analysis(self.output_base)
 
         # Summary
         print("\n" + "=" * 60)
@@ -460,6 +544,12 @@ class RadarProcessingPipeline:
         print(f"Successful: {successful}")
         print(f"Failed: {failed}")
 
+        if successful > 0:
+            if specific_configs is None or len(specific_configs) > 1:
+                print(f"\n✓ Aggregate analysis generated for {successful} datasets")
+            else:
+                print(f"\n📝 Single configuration mode - no aggregate analysis generated")
+
         if failed > 0:
             print(f"\nSome datasets failed to process completely.")
         else:
@@ -467,26 +557,29 @@ class RadarProcessingPipeline:
 
 
 def main():
-    """Main function with command line interface."""
+    """Main function with enhanced command line interface."""
     parser = argparse.ArgumentParser(
         description='Radar data processing pipeline: extraction → prediction → tracking',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Process all datasets with default config
-  python main_pipeline.py
-
-  # Process specific dataset  
+  # Process with default configurations
   python main_pipeline.py --target RECORD@2020-11-22_12.45.05
 
-  # Process multiple specific datasets
-  python main_pipeline.py --target RECORD@2020-11-22_12.45.05 RECORD@2020-11-22_08.45.18
+  # Process with only baseline configuration
+  python main_pipeline.py --target RECORD@2020-11-22_12.45.05 --tracking-configs baseline
+
+  # Process with specific configurations
+  python main_pipeline.py --target RECORD@2020-11-22_12.45.05 --tracking-configs baseline adaptive_assoc_linear
+
+  # List available tracking configurations
+  python main_pipeline.py --list-tracking-configs
+
+  # Process all datasets with default configurations
+  python main_pipeline.py
 
   # Force reprocess all steps (skip existing = False)
   python main_pipeline.py --no-skip-existing
-
-  # Use custom config file
-  python main_pipeline.py --config custom_config.yaml
         """
     )
 
@@ -514,11 +607,29 @@ Examples:
         help='List available datasets and exit'
     )
 
+    parser.add_argument(
+        '--tracking-configs',
+        nargs='*',
+        help='Specific tracking configurations to run. Use --list-tracking-configs to see available options. '
+             'If not specified, default configurations will be used.'
+    )
+
+    parser.add_argument(
+        '--list-tracking-configs',
+        action='store_true',
+        help='List available tracking configurations and exit'
+    )
+
     args = parser.parse_args()
 
     try:
         # Initialize pipeline with config
         pipeline = RadarProcessingPipeline(config_path=args.config)
+
+        # List tracking configurations if requested
+        if args.list_tracking_configs:
+            pipeline.config_manager.print_available_configurations()
+            return
 
         # List datasets if requested
         if args.list_datasets:
@@ -532,7 +643,8 @@ Examples:
         skip_existing = not args.no_skip_existing
         pipeline.run_pipeline(
             target_datasets=args.target,
-            skip_existing=skip_existing
+            skip_existing=skip_existing,
+            specific_configs=args.tracking_configs
         )
 
     except Exception as e:
@@ -547,18 +659,18 @@ if __name__ == '__main__':
 
 # Usage Examples
 # ============================
-
-# # Process all datasets
-# python main_pipeline.py
 #
-# # Process specific dataset
+# # Run all default configurations (baseline, adaptive_assoc_linear, adaptive_both_linear)
 # python main_pipeline.py --target RECORD@2020-11-22_12.45.05
 #
-# # List available datasets
-# python main_pipeline.py --list-datasets
+# # Run only baseline configuration
+# python main_pipeline.py --target RECORD@2020-11-22_12.45.05 --tracking-configs baseline
 #
-# # Force reprocess everything
-# python main_pipeline.py --no-skip-existing
+# # Run specific configurations
+# python main_pipeline.py --target RECORD@2020-11-22_12.45.05 --tracking-configs baseline adaptive_assoc_linear adaptive_both_squared
 #
-# # Use custom paths
-# python main_pipeline.py --data-dir /path/to/data --output-dir /path/to/output
+# # List all available configurations
+# python main_pipeline.py --list-tracking-configs
+#
+# # Run all configurations
+# python main_pipeline.py --target RECORD@2020-11-22_12.45.05 --tracking-configs baseline adaptive_assoc_linear adaptive_assoc_squared adaptive_assoc_stepped adaptive_both_linear adaptive_both_squared adaptive_both_stepped

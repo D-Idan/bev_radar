@@ -1,0 +1,52 @@
+# Tracking Configuration Variations
+# Each configuration defines overrides to apply to the base tracker config
+
+configurations:
+  baseline:
+    description: "Baseline configuration without adaptive R matrix"
+    overrides:
+      use_adaptive_r_in_association: false
+      use_adaptive_r_in_update: false
+
+  adaptive_assoc_linear:
+    description: "Adaptive R in association with linear weighting"
+    overrides:
+      use_adaptive_r_in_association: true
+      use_adaptive_r_in_update: false
+      r_weighting_strategy: "linear"
+
+  adaptive_assoc_squared:
+    description: "Adaptive R in association with squared weighting"
+    overrides:
+      use_adaptive_r_in_association: true
+      use_adaptive_r_in_update: false
+      r_weighting_strategy: "squared"
+
+  adaptive_assoc_stepped:
+    description: "Adaptive R in association with stepped weighting"
+    overrides:
+      use_adaptive_r_in_association: true
+      use_adaptive_r_in_update: false
+      r_weighting_strategy: "stepped"
+
+#  # Example of additional custom configuration
+#  experimental_high_confidence:
+#    description: "Experimental configuration favoring high confidence detections"
+#    overrides:
+#      use_adaptive_r_in_association: true
+#      use_adaptive_r_in_update: true
+#      r_weighting_strategy: "stepped"
+#      min_confidence_init: 0.7
+#      min_confidence_assoc: 0.4
+#      confidence_weight: 0.5
+
+# Default configurations to run (when no specific configs are requested)
+default_configurations:
+  - baseline
+  - adaptive_assoc_linear
+  - adaptive_assoc_stepped
+  - adaptive_assoc_squared
+#  - # experimental_high_confidence
+
+# Baseline configuration for comparisons
+baseline_config: "baseline"
