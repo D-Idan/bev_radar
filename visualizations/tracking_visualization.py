@@ -75,7 +75,6 @@ class TrackingVisualizationTool:
         tracking_df = pd.read_csv(tracking_csv) if tracking_csv is not None else None
         return labels_df, predictions_df, tracking_df
 
-
     def create_simplified_visualization(self, sample_id: int, labels_df: pd.DataFrame,
                                         predictions_df: pd.DataFrame, tracking_df: Optional[pd.DataFrame],
                                         image_path: Path, ra_path: Path) -> plt.Figure:
@@ -92,9 +91,18 @@ class TrackingVisualizationTool:
         sample_tracks = (tracking_df[tracking_df['sample_id'] == sample_id]
                          if tracking_df is not None else None)
 
+        # Get time information
+        timestamp, time_gap = self._get_time_info(sample_id, tracking_df, labels_df)
+
         # Create figure with 1x2 layout for side-by-side plots
         fig, axs = plt.subplots(1, 2, figsize=(16, 8))
-        fig.suptitle(f'Radar Tracking Visualization - Sample {sample_id}', fontsize=16, fontweight='bold')
+
+        # Enhanced title with time information
+        title = f'Radar Tracking Visualization - Sample {sample_id}'
+        if timestamp is not None and time_gap is not None:
+            title += f' | Time: {timestamp:.3f}s | Δt: {time_gap:.3f}s'
+
+        fig.suptitle(title, fontsize=16, fontweight='bold')
 
         # Panel 1: Camera image (left side)
         if image is not None:
@@ -119,7 +127,6 @@ class TrackingVisualizationTool:
         plt.tight_layout(rect=[0, 0.05, 1, 0.96])
 
         return fig
-
 
     def _annotate_camera_image_simplified(self, image: np.ndarray, predictions_df: pd.DataFrame,
                                           tracks_df: Optional[pd.DataFrame]) -> np.ndarray:
@@ -318,6 +325,39 @@ class TrackingVisualizationTool:
         # Move y-axis (range) to the right side
         ax.yaxis.tick_right()
         ax.yaxis.set_label_position("right")
+
+    def _get_time_info(self, sample_id: int, tracking_df: Optional[pd.DataFrame], labels_df: pd.DataFrame) -> Tuple[
+        Optional[float], Optional[float]]:
+        """Get timestamp and time gap for the current sample, with labels as fallback."""
+
+        # First try to get from tracking data (preferred source)
+        if tracking_df is not None and not tracking_df.empty:
+            sample_tracks = tracking_df[tracking_df['sample_id'] == sample_id]
+            if not sample_tracks.empty:
+                # Get the first row's timestamp and time_gap (should be same for all tracks in this sample)
+                timestamp = sample_tracks.iloc[0]['timestamp']
+                time_gap = sample_tracks.iloc[0]['time_gap']
+                return timestamp, time_gap
+
+        # Fallback to labels data
+        sample_labels = labels_df[labels_df['numSample'] == sample_id]
+        if sample_labels.empty:
+            return None, None
+
+        # Convert timestamp from microseconds to seconds
+        timestamp_us = sample_labels.iloc[0]['timestamp_us']
+        timestamp = timestamp_us / 1_000_000.0  # Convert to seconds
+
+        # Calculate time gap from previous sample
+        time_gap = None
+        prev_sample_id = sample_id - 1
+        prev_labels = labels_df[labels_df['numSample'] == prev_sample_id]
+        if not prev_labels.empty:
+            prev_timestamp_us = prev_labels.iloc[0]['timestamp_us']
+            prev_timestamp = prev_timestamp_us / 1_000_000.0
+            time_gap = timestamp - prev_timestamp
+
+        return timestamp, time_gap
 
 
 def create_tracking_video(data_dir: Path, output_dir: Path, labels_csv: str,
