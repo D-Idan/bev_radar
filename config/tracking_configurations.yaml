@@ -8,13 +8,8 @@ configurations:
     overrides:
       use_adaptive_r_in_association: false
       use_adaptive_r_in_update: false
-
-  adaptive_assoc_linear:
-    description: "Adaptive R in association with linear weighting"
-    overrides:
-      use_adaptive_r_in_association: true
-      use_adaptive_r_in_update: false
-      r_weighting_strategy: "linear"
+      min_confidence_init: 0.8  # Minimum confidence to create new tracks
+      min_confidence_assoc: 0.5  # Minimum confidence for detection-track association
 
   adaptive_assoc_squared:
     description: "Adaptive R in association with squared weighting"
@@ -22,13 +17,31 @@ configurations:
       use_adaptive_r_in_association: true
       use_adaptive_r_in_update: false
       r_weighting_strategy: "squared"
+      min_confidence_init: 0.8  # Minimum confidence to create new tracks
+      min_confidence_assoc: 0.5  # Minimum confidence for detection-track association
+      r_max_factor: 10000
 
-  adaptive_assoc_stepped:
-    description: "Adaptive R in association with stepped weighting"
-    overrides:
-      use_adaptive_r_in_association: true
-      use_adaptive_r_in_update: false
-      r_weighting_strategy: "stepped"
+
+#  adaptive_assoc_linear:
+#    description: "Adaptive R in association with linear weighting"
+#    overrides:
+#      use_adaptive_r_in_association: true
+#      use_adaptive_r_in_update: false
+#      r_weighting_strategy: "linear"
+#
+#  adaptive_assoc_squared:
+#    description: "Adaptive R in association with squared weighting"
+#    overrides:
+#      use_adaptive_r_in_association: true
+#      use_adaptive_r_in_update: false
+#      r_weighting_strategy: "squared"
+#
+#  adaptive_assoc_stepped:
+#    description: "Adaptive R in association with stepped weighting"
+#    overrides:
+#      use_adaptive_r_in_association: true
+#      use_adaptive_r_in_update: false
+#      r_weighting_strategy: "stepped"
 
 #  # Example of additional custom configuration
 #  experimental_high_confidence:
@@ -44,9 +57,9 @@ configurations:
 # Default configurations to run (when no specific configs are requested)
 default_configurations:
   - baseline_tracking
-  - adaptive_assoc_linear
-  - adaptive_assoc_stepped
-  - adaptive_assoc_squared
+  - chi95_baseline_tracking
+  - chi95_adaptive_assoc_squared
+#  - adaptive_assoc_squared
 #  - # experimental_high_confidence
 
 # Baseline is raw predictions (not a tracking configuration)
