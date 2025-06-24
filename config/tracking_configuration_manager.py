@@ -81,8 +81,33 @@ class TrackingConfigurationManager:
 
             # Apply overrides from YAML
             overrides = config_def.get('overrides', {})
+            
+            # Define which parameters belong at the root level vs tracker_config
+            root_level_params = {'create_video', 'max_video_samples', 'max_frames'}
+            
+            # Define parameters that should update nested r_weighting_config
+            r_weighting_params = {'r_min_factor', 'r_max_factor', 'stepped_r_thresholds', 'stepped_r_factors'}
+            
+            # Define parameters that should update nested kalman_config
+            kalman_params = {'process_noise_q_std', 'measurement_noise_std', 'initial_pos_std', 'initial_vel_std'}
+            
             for key, value in overrides.items():
-                config['tracker_config'][key] = value
+                if key in root_level_params:
+                    # Apply to root level
+                    config[key] = value
+                elif key in r_weighting_params:
+                    # Apply to nested r_weighting_config
+                    if 'r_weighting_config' not in config['tracker_config']:
+                        config['tracker_config']['r_weighting_config'] = {}
+                    config['tracker_config']['r_weighting_config'][key] = value
+                elif key in kalman_params:
+                    # Apply to nested kalman_config
+                    if 'kalman_config' not in config['tracker_config']:
+                        config['tracker_config']['kalman_config'] = {}
+                    config['tracker_config']['kalman_config'][key] = value
+                else:
+                    # Apply to tracker_config
+                    config['tracker_config'][key] = value
 
             # Update output directory to include config name
             config['output_dir'] = str(dataset_root / 'plots' / 'tracking_output' / config_name)
