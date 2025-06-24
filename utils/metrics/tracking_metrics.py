@@ -526,7 +526,8 @@ def evaluate_tracking_sequence(predictions_csv: str, ground_truth_csv: str,
                                tracking_csv: str, output_dir: str,
                                distance_threshold: float = 5.0,
                                iou_threshold: float = 0.3,
-                               max_frames: Optional[int] = None) -> Tuple[Path, Dict[str, Any]]:
+                               max_frames: Optional[int] = None,
+                               skip_initial_frames: int = 3) -> Tuple[Path, Dict[str, Any]]:
     """Evaluate complete tracking sequence and save both JSON and text reports."""
     evaluator = TrackingDetectionEvaluator(
         distance_threshold=distance_threshold,
@@ -541,6 +542,13 @@ def evaluate_tracking_sequence(predictions_csv: str, ground_truth_csv: str,
     # Get frames with ground truth
     gt_frames = set(ground_truth_df['numSample'].unique())
     frame_ids = sorted(gt_frames)
+
+    # Skip initial frames
+    if skip_initial_frames > 0 and len(frame_ids) > skip_initial_frames:
+        skipped_frames = frame_ids[:skip_initial_frames]
+        frame_ids = frame_ids[skip_initial_frames:]
+        print(f"Skipping first {skip_initial_frames} frames from metrics: {skipped_frames}")
+
     if max_frames:
         frame_ids = frame_ids[:max_frames]
 
