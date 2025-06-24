@@ -458,6 +458,8 @@ def offline_tracking(
                         distance_threshold= config['max_distance_threshold'],
                         iou_threshold= 0.5,  # Default IoU threshold for evaluation
                         max_frames= max_frames,
+                        skip_initial_frames=config['min_hits'],
+
     )
 
     # ===== ENHANCED VISUALIZATION AND VIDEO CREATION =====
