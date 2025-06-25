@@ -296,6 +296,8 @@ class RadarKalmanFilter:
             confidence_factor = 1.0
 
         # INVERT CONFIDENCE FOR GATING
+        # Ensure confidence_factor is a numpy-compatible type
+        confidence_factor = float(confidence_factor)
         if invert_confidence:
             return self.R / confidence_factor # Mahalanobis gating uses inverse scaling
         return self.R * confidence_factor
