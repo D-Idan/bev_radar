@@ -397,6 +397,8 @@ class RadarProcessingPipeline:
 
             except Exception as e:
                 print(f"      ✗ Configuration {config_name} failed: {e}")
+                print("      Full traceback:")
+                traceback.print_exc()
                 results[config_name] = False
 
         # Generate comparison report after all configurations complete
