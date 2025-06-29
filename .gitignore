@@ -52,6 +52,7 @@ ENV/
 *.ini
 configs/config.ini
 *config*json
+config/pipeline_config.yaml
 
 # External
 external/*
@@ -67,3 +68,4 @@ external/*
 *.zip
 
 *.pdf
+config/pipeline_config.yaml
