@@ -678,3 +678,23 @@ if __name__ == '__main__':
 #
 # # Run all configurations
 # python main_pipeline.py --target RECORD@2020-11-22_12.45.05 --tracking-configs baseline adaptive_assoc_linear adaptive_assoc_squared adaptive_assoc_stepped adaptive_both_linear adaptive_both_squared adaptive_both_stepped
+"""
+Examples:
+  # Process with default configurations
+  python main_pipeline.py --target RECORD@2020-11-22_12.45.05
+
+  # Process with only baseline configuration
+  python main_pipeline.py --target RECORD@2020-11-22_12.45.05 --tracking-configs baseline
+
+  # Process with specific configurations
+  python main_pipeline.py --target RECORD@2020-11-22_12.45.05 --tracking-configs baseline adaptive_assoc_linear
+
+  # List available tracking configurations
+  python main_pipeline.py --list-tracking-configs
+
+  # Process all datasets with default configurations
+  python main_pipeline.py
+
+  # Force reprocess all steps (skip existing = False)
+  python main_pipeline.py --no-skip-existing
+        """
