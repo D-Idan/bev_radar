@@ -1,0 +1,24 @@
+digraph CompactPipeline {
+    rankdir=LR;
+    node [shape=box, style=filled, fontname="Times-Roman", fontsize=12];
+    edge [fontname="Times-Roman", fontsize=11, penwidth=2];
+    
+    size="";
+    ratio=fill;
+    
+    // Pipeline stages
+    polar [label="Polar Radar\n(R, θ, v)", fillcolor=lightcyan];
+    cartesian [label="Cartesian Tracking\n(x, y, vₓ, vᵧ)", fillcolor=lightgreen];
+    camera [label="Camera Projection\nBounding Boxes", fillcolor=lightcoral];
+    
+    // Transformation equations
+    transform1 [label="x = R·sin(θ)\ny = R·cos(θ)", shape=ellipse, fillcolor=wheat];
+    transform2 [label="3D World Model\n+ Perspective Projection", shape=ellipse, fillcolor=lavender];
+    
+    // Flow
+    polar -> transform1 -> cartesian -> transform2 -> camera;
+    
+    // Coordinate system labels
+    polar -> cartesian [label="Coordinate\nTransformation"];
+    cartesian -> camera [label="3D Modeling +\nCamera Calibration"];
+}

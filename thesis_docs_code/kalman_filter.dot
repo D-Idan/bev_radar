@@ -1,0 +1,45 @@
+digraph CompactKalman {
+   rankdir=LR;
+   node [shape=box, style=filled, fontname="Times-Roman", fontsize=11];
+   edge [fontname="Times-Roman", fontsize=10, penwidth=2];
+   
+   ratio=fill;
+   
+   // States
+   prev_state [label="Previous State\nXₖ₋₁, Pₖ₋₁", fillcolor=lightcyan];
+   
+   pred_state [label="Prediction\nX̂ₖ|ₖ₋₁ = F·Xₖ₋₁\nP̂ₖ|ₖ₋₁ = F·P·Fᵀ + Q", fillcolor=khaki];
+   
+   measurement [label="Measurement\nz ± R(confidence)", fillcolor=lightgreen];
+   
+   association [label="Mahalanobis Gating\nd²ₘ = (z-Hx̂)ᵀS⁻¹(z-Hx̂)\nS = H·P̂·Hᵀ + R", fillcolor=lavender];
+   
+   update_state [label="Update\nXₖ = X̂ₖ + K·(z-Hx̂)\nPₖ = (I-KH)·P̂ₖ", fillcolor=lightcoral];
+   
+   // Uncertainty visualizations
+   ellipse1 [label="Initial\nUncertainty", shape=ellipse, fillcolor=lightblue, width=1.2, height=0.8];
+   ellipse2 [label="Expanded\nUncertainty", shape=ellipse, fillcolor=yellow, width=1.5, height=1.0];
+   ellipse3 [label="Gating\nEllipse", shape=ellipse, fillcolor=purple, width=1.8, height=1.2, style="dashed"];
+   ellipse4 [label="Refined\nUncertainty", shape=ellipse, fillcolor=red, width=1.0, height=0.6];
+   
+   // Flow
+   prev_state -> pred_state [label="                           Predict"];
+   pred_state -> association;
+   measurement -> association [label="Associate"];
+   association -> update_state [label="If d²ₘ ≤ χ²"];
+   
+   // Uncertainty evolution
+   prev_state -> ellipse1 [style=dotted];
+   pred_state -> ellipse2 [style=dotted];
+   association -> ellipse3 [style=dotted];
+   update_state -> ellipse4 [style=dotted];
+   
+   // Layout constraints - force vertical alignment
+   {rank=same; prev_state; pred_state; measurement}
+   {rank=same; association}
+   {rank=same; update_state}
+   {rank=same; ellipse1; ellipse2; ellipse3; ellipse4}
+   
+   // Add invisible edge to force vertical positioning
+   association -> update_state [style=invis, weight=10];
+}
