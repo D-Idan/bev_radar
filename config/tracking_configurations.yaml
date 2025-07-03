@@ -28,7 +28,7 @@ configurations:
 
 
 
-  adaptive_assoc_linear:
+  adaptive100_assoc_linear:
     description: "Adaptive R in association with linear weighting"
     overrides:
       use_adaptive_r_in_association: true
@@ -36,6 +36,42 @@ configurations:
       r_weighting_strategy: "linear"
       r_min_factor: 0.9
       r_max_factor: 100
+
+  adaptive10_assoc_linear:
+    description: "Adaptive R in association with linear weighting"
+    overrides:
+      use_adaptive_r_in_association: true
+      use_adaptive_r_in_update: false
+      r_weighting_strategy: "linear"
+      r_min_factor: 0.9
+      r_max_factor: 10
+
+  adaptive1000_assoc_linear:
+    description: "Adaptive R in association with linear weighting"
+    overrides:
+      use_adaptive_r_in_association: true
+      use_adaptive_r_in_update: false
+      r_weighting_strategy: "linear"
+      r_min_factor: 0.9
+      r_max_factor: 1000
+
+  adaptive10000_assoc_linear:
+    description: "Adaptive R in association with linear weighting"
+    overrides:
+      use_adaptive_r_in_association: true
+      use_adaptive_r_in_update: false
+      r_weighting_strategy: "linear"
+      r_min_factor: 0.9
+      r_max_factor: 10000
+
+  adaptive100000_assoc_linear:
+    description: "Adaptive R in association with linear weighting"
+    overrides:
+      use_adaptive_r_in_association: true
+      use_adaptive_r_in_update: false
+      r_weighting_strategy: "linear"
+      r_min_factor: 0.9
+      r_max_factor: 100000
 #
 #  adaptive_assoc_squared:
 #    description: "Adaptive R in association with squared weighting"
@@ -67,10 +103,15 @@ configurations:
 # Default configurations to run (when no specific configs are requested)
 default_configurations:
   - baseline_tracking
-  - distance_only
+#  - distance_only
 #  - adaptive_assoc_squared
 #  - adaptive_assoc_stepped
-  - adaptive_assoc_linear
+#  - adaptive_assoc_linear
+  - adaptive10_assoc_linear
+  - adaptive100_assoc_linear
+  - adaptive1000_assoc_linear
+  - adaptive10000_assoc_linear
+  - adaptive100000_assoc_linear
 #  - # experimental_high_confidence
 
 # Baseline is raw predictions (not a tracking configuration)
