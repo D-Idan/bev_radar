@@ -1,0 +1,87 @@
+# =============================================================================
+# RADAR PROCESSING PIPELINE CONFIGURATION
+# =============================================================================
+
+
+# =============================================================================
+# TRACKING CONFIGURATION
+# =============================================================================
+tracking:
+  # Processing options
+  create_video: false # Create video output
+  max_video_samples: null  # null = no limit, integer = limit samples
+  max_frames: null  # null = all frames, integer = limit for debugging
+
+  # Track lifecycle parameters
+  lifecycle:
+    max_age: 3  # Max frames without detection before track deletion
+    min_hits: 3  # Min detections required for track confirmation
+    max_velocity_ms: 83.3  # 300 km/h = 83.3 m/s - max expected object velocity
+
+  # Timing parameters
+  timing:
+    base_dt: 0.2  # 200ms base time step
+    max_dt_gap: 1.0  # Trigger multi-step prediction for gaps > 1.0s
+    max_time_without_update: 2.0  # Kill tracks after 1 second without update
+    max_frame_gap_time: 4.0  # Kill all tracks if frame gap > 2 seconds
+
+  # Association strategy and confidence parameters
+  association:
+    strategy: "mahalanobis_distance"  # "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score", "mahalanobis_distance"
+    min_confidence_init: 0.5  # Minimum confidence to create new tracks
+    min_confidence_assoc: 0.2  # Minimum confidence for detection-track association
+    confidence_weight: 0.3  # Weight factor for confidence in hybrid strategies
+
+  # Adaptive R matrix configuration
+  adaptive_r:
+    use_in_association: false  # Control Mahalanobis distance calculation
+    use_in_update: false  # Control Kalman filter update
+    weighting_strategy: "linear"  # "squared", "linear", "stepped"
+    config:
+      r_min_factor: 0.7  # High confidence: 70% of base R
+      r_max_factor: 15.0  # Low confidence: 15x base R
+      stepped_r_thresholds: [0.9, 0.8, 0.7, 0.5]
+      stepped_r_factors: [0.7, 0.8, 1.0, 1.5, 2.0, 3.0]
+
+  # Mahalanobis distance parameters
+  mahalanobis:
+    default_chi2_threshold: 4.605  # 90% confidence (4.605), 95% (5.991), 99% (6.635)
+
+  # Range culling parameters
+  range_culling:
+    enable: true
+    range_buffer: 10.0  # meters
+    azimuth_buffer_deg: 5.0  # degrees
+
+  # Kalman filter parameters
+  kalman:
+    process_noise_q_std: 1.0
+    measurement_noise_std: 0.2
+    initial_pos_std: 2.0
+    initial_vel_std: 5.0
+
+  # Evaluation parameters
+  evaluation:
+    max_distance_threshold: 2.0  # Distance threshold for valid associations in evaluation (meters) default: 2.0
+
+
+# =============================================================================
+# CONFIGURATION FILES
+# =============================================================================
+config_files:
+  radar_model_config: "config/radar_model_config.yaml"
+
+# =============================================================================
+# PATH CONFIGURATION
+# =============================================================================
+paths:
+  # Input data paths
+  data_dir: "/Volumes/ELEMENTS/datasets/radial"
+  calibration_table: "/Volumes/ELEMENTS/datasets/radial/CalibrationTable.npy"
+  labels_path: "/Volumes/ELEMENTS/datasets/radial/labels_CVPR.csv"
+
+  # Model path
+  model_path: "/Volumes/ELEMENTS/datasets/Trained_Models/RADIal_SwinTransformer_ADC.pth"
+
+  # Output paths
+  output_base: "/Volumes/ELEMENTS/datasets/radial/RadIal_Data"

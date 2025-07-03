@@ -52,6 +52,10 @@ ENV/
 *.ini
 configs/config.ini
 *config*json
+<<<<<<< HEAD
+=======
+config/pipeline_config.yaml
+>>>>>>> refs/remotes/origin/main
 
 # External
 external/*
@@ -67,3 +71,7 @@ external/*
 *.zip
 
 *.pdf
+<<<<<<< HEAD
+=======
+config/pipeline_config.yaml
+>>>>>>> refs/remotes/origin/main

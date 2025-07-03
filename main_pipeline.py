@@ -677,4 +677,31 @@ if __name__ == '__main__':
 # python main_pipeline.py --list-tracking-configs
 #
 # # Run all configurations
+<<<<<<< HEAD
 # python main_pipeline.py --target RECORD@2020-11-22_12.45.05 --tracking-configs baseline adaptive_assoc_linear adaptive_assoc_squared adaptive_assoc_stepped adaptive_both_linear adaptive_both_squared adaptive_both_stepped
+=======
+# python main_pipeline.py --target RECORD@2020-11-22_12.45.05 --tracking-configs baseline adaptive_assoc_linear adaptive_assoc_squared adaptive_assoc_stepped adaptive_both_linear adaptive_both_squared adaptive_both_stepped
+"""
+Examples:
+  # Process with default configurations
+  python main_pipeline.py --target RECORD@2020-11-22_12.45.05
+
+  # Process with only baseline configuration
+  python main_pipeline.py --target RECORD@2020-11-22_12.45.05 --tracking-configs baseline
+
+  # Process with specific configurations
+  python main_pipeline.py --target RECORD@2020-11-22_12.45.05 --tracking-configs baseline adaptive_assoc_linear
+
+  # List available tracking configurations
+  python main_pipeline.py --list-tracking-configs
+
+  # Process all datasets with default configurations
+  python main_pipeline.py
+
+  # Force reprocess all steps (skip existing = False)
+  python main_pipeline.py --no-skip-existing
+        """
+
+# Datasets length > 300 frames
+# RECORD@2020-11-21_11.54.31 RECORD@2020-11-21_12.11.17 RECORD@2020-11-21_13.37.04 RECORD@2020-11-21_14.20.52 RECORD@2020-11-21_14.25.06 RECORD@2020-11-22_08.45.18 RECORD@2020-11-22_11.15.06 RECORD@2020-11-22_11.51.27 RECORD@2020-11-22_12.11.49 RECORD@2020-11-22_12.25.47 RECORD@2020-11-22_12.40.08 RECORD@2020-11-22_12.45.05 RECORD@2020-11-22_12.49.56 RECORD@2020-11-22_12.54.38
+>>>>>>> refs/remotes/origin/main

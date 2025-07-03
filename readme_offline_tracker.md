@@ -242,4 +242,25 @@ config = {
 - ✅ **Separate outputs** - Each configuration gets its own directory
 - ✅ **Comprehensive metrics** - Precision, recall, F1, DetA, distance, IoU
 - ✅ **Flexible execution** - Run specific configs or defaults
+<<<<<<< HEAD
 - ✅ **Detailed reporting** - Per-dataset + aggregate analysis
+=======
+- ✅ **Detailed reporting** - Per-dataset + aggregate analysis
+
+
+## changed Algorithm tracking for established tracks
+
+**Problem**: Original algorithm used Mahalanobis distance for all associations, causing failures when objects moved during the first 2 frames (velocity = 0).
+
+**Solution**: Hybrid association strategy:
+
+1. **Frames 1-2**: Use Euclidean distance only (handles movement with zero velocity)
+2. **Frame 3+**: Switch to Mahalanobis distance (leverages velocity predictions)
+
+**Implementation**:
+- Modified `_create_cost_matrix()` to check `track.hits <= 1` 
+- Updated `_is_valid_association()` to use different thresholds based on track maturity
+- Distance threshold for early tracks, chi-squared threshold for mature tracks
+
+**Result**: More robust association that prevents track loss during velocity bootstrap phase while maintaining sophisticated tracking for established tracks.
+>>>>>>> refs/remotes/origin/main
