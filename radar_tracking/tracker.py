@@ -437,11 +437,7 @@ class RadarTracker:
             # Filter matches by distance threshold and confidence requirements
             matches = []
             for t_idx, d_idx in zip(track_indices, det_indices):
-<<<<<<< HEAD
-                if self._is_valid_association(cost_matrix[t_idx, d_idx], detections[d_idx], distance_threshold):
-=======
                 if self._is_valid_association(cost_matrix[t_idx, d_idx], detections[d_idx], distance_threshold, t_idx):
->>>>>>> refs/remotes/origin/main
                     matches.append((t_idx, d_idx))
 
             # Find unmatched tracks and detections
@@ -473,11 +469,7 @@ class RadarTracker:
             Cost matrix for Hungarian algorithm
         """
         # Use large finite value instead of infinity for Hungarian algorithm
-<<<<<<< HEAD
-        self.LARGE_COST = 1e9
-=======
         self.LARGE_COST = 1e90
->>>>>>> refs/remotes/origin/main
         cost_matrix = np.full((len(self.tracks), len(detections)), self.LARGE_COST)
 
         for t, track in enumerate(self.tracks):
@@ -486,71 +478,6 @@ class RadarTracker:
                 det_pos = detection.cartesian_pos
                 distance = euclidean_distance(track_pos, det_pos)
 
-<<<<<<< HEAD
-                if self.association_strategy == AssociationStrategy.DISTANCE_ONLY:
-                    cost_matrix[t, d] = distance
-
-                elif self.association_strategy == AssociationStrategy.CONFIDENCE_WEIGHTED:
-                    # Weight distance by inverse confidence
-                    confidence_factor = 1.0 / max(detection.confidence, 0.1)
-                    cost_matrix[t, d] = distance * (1.0 + self.confidence_weight * (confidence_factor - 1.0))
-
-                elif self.association_strategy == AssociationStrategy.CONFIDENCE_GATED:
-                    # Use distance but apply confidence gating
-                    if detection.confidence < self.min_confidence_assoc:
-                        cost_matrix[t, d] = float('inf')  # Reject low confidence
-                    else:
-                        cost_matrix[t, d] = distance
-
-
-                elif self.association_strategy in [AssociationStrategy.MAHALANOBIS_DISTANCE]:
-                    # The confidence weighting happens in the update step
-                    pred_state = track.predicted_state if track.predicted_state is not None else track.state
-                    pred_covariance = track.predicted_covariance if track.predicted_covariance is not None else track.covariance
-
-                    # Use adaptive R in association if enabled
-                    if self.use_adaptive_r_in_association:
-                        mahal_dist = self.kf.gating_distance(
-                            pred_state, pred_covariance, det_pos,
-                            confidence=detection.confidence,
-                            r_strategy=self.r_weighting_strategy,
-                            strategy_params=self.r_weighting_config
-                        )
-                    else:
-                        # Standard Mahalanobis without confidence weighting
-                        mahal_dist = self.kf.gating_distance(
-                            pred_state, pred_covariance, det_pos
-                            # No confidence parameters
-                        )
-
-                    cost_matrix[t, d] = mahal_dist
-
-                elif self.association_strategy == AssociationStrategy.HYBRID_SCORE:
-                    # Combine distance, confidence, and track quality
-                    mahal_dist = self.kf.gating_distance(
-                        track.state, track.covariance, det_pos
-                    )
-                    # Normalize Mahalanobis distance
-                    mahal_norm = min(mahal_dist / 10.0, 3.0)
-
-                    # Track quality score (higher is better)
-                    track_quality = min(track.hits / max(track.age, 1), 1.0)
-
-                    # Confidence score (higher is better)
-                    conf_score = detection.confidence
-
-                    # Combined cost (lower is better)
-                    distance_cost = distance / distance_threshold  # Normalize distance
-                    confidence_cost = (1.0 - conf_score) * 2.0  # Penalty for low confidence
-                    mahal_cost = mahal_norm * 0.5  # Mahalanobis component
-                    track_bonus = (1.0 - track_quality) * 0.5  # Penalty for poor tracks
-
-                    cost_matrix[t, d] = distance_cost + confidence_cost + mahal_cost + track_bonus
-
-        return cost_matrix
-
-    def _is_valid_association(self, cost: float, detection: Detection, distance_threshold: float) -> bool:
-=======
                 # Use distance-only for early tracks (hits <= 1)
                 if track.hits <= 1:
                     cost_matrix[t, d] = distance
@@ -621,7 +548,6 @@ class RadarTracker:
 
     def _is_valid_association(self, cost: float, detection: Detection, distance_threshold: float,
                               track_idx: int = None) -> bool:
->>>>>>> refs/remotes/origin/main
         """
         Check if an association is valid based on cost and confidence.
         Updated to use dynamic distance threshold.
@@ -642,8 +568,6 @@ class RadarTracker:
         if detection.confidence < self.min_confidence_assoc:
             return False
 
-<<<<<<< HEAD
-=======
         # Get track to check its maturity
         track = self.tracks[track_idx] if track_idx is not None else None
 
@@ -651,7 +575,6 @@ class RadarTracker:
         if track and track.hits <= 1:
             return cost <= distance_threshold
 
->>>>>>> refs/remotes/origin/main
         # For Mahalanobis-based strategies, use chi-squared threshold
         if self.association_strategy in [AssociationStrategy.MAHALANOBIS_DISTANCE]:
             return cost <= self.default_chi2_threshold

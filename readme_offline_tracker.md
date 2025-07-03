@@ -242,9 +242,6 @@ config = {
 - ✅ **Separate outputs** - Each configuration gets its own directory
 - ✅ **Comprehensive metrics** - Precision, recall, F1, DetA, distance, IoU
 - ✅ **Flexible execution** - Run specific configs or defaults
-<<<<<<< HEAD
-- ✅ **Detailed reporting** - Per-dataset + aggregate analysis
-=======
 - ✅ **Detailed reporting** - Per-dataset + aggregate analysis
 
 
@@ -263,4 +260,3 @@ config = {
 - Distance threshold for early tracks, chi-squared threshold for mature tracks
 
 **Result**: More robust association that prevents track loss during velocity bootstrap phase while maintaining sophisticated tracking for established tracks.
->>>>>>> refs/remotes/origin/main
