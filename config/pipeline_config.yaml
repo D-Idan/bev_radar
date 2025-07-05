@@ -8,9 +8,15 @@
 # =============================================================================
 tracking:
   # Processing options
-  create_video: false # Create video output
+  create_video: true # Create video output
   max_video_samples: null  # null = no limit, integer = limit samples
   max_frames: null  # null = all frames, integer = limit for debugging
+
+  # Poor performance analysis
+  poor_performance_analysis:
+    enable: true  # Enable/disable poor performance analysis
+    metrics_to_analyze: ['det_a', 'camera_iou_mean'] # Metrics to analyze ['det_a', 'precision', 'recall', 'f1_score', 'camera_iou_mean']
+    top_k_worst_frames: 20  # Number of worst frames to identify per metric
 
   # Track lifecycle parameters
   lifecycle:

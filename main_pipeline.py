@@ -258,6 +258,17 @@ class RadarProcessingPipeline:
 
             # Evaluation parameters
             'max_distance_threshold': self.config['tracking']['evaluation']['max_distance_threshold'],
+
+            # Poor performance analysis
+            'poor_performance_analysis': {
+                'enable': self.config['tracking'].get('poor_performance_analysis', {}).get('enable', False),
+                'metrics_to_analyze': self.config['tracking'].get('poor_performance_analysis', {}).get(
+                    'metrics_to_analyze', ['det_a']
+                ),
+                'top_k_worst_frames': self.config['tracking'].get('poor_performance_analysis', {}).get(
+                    'top_k_worst_frames', 20
+                )
+            }
         }
 
         return {

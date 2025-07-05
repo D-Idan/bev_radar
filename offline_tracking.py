@@ -21,6 +21,8 @@ from visualizations.track_viz import (
 from visualizations.tracking_visualization import create_tracking_video
 from visualizations.visualize_timing import plot_timing_analysis, plot_detailed_timing_analysis
 from utils.metrics.tracking_metrics import evaluate_tracking_sequence
+from utils.metrics.poor_performance_analyzer import analyze_poor_performance_for_configuration
+
 
 def setup_tracking_system():
     """
@@ -462,6 +464,31 @@ def offline_tracking(
                         max_frame_gap_time=config['max_frame_gap_time'],
 
     )
+
+    # Run poor performance analysis if enabled
+    if tracker_config.get('poor_performance_analysis', {}).get('enable', False):
+        print("\nAnalyzing frames with poor tracking performance...")
+
+        # Get configuration name from output directory
+        config_name = Path(output_dir).name
+        dataset_root = Path(output_dir).parent.parent.parent
+
+        metrics_to_analyze = tracker_config['poor_performance_analysis'].get(
+            'metrics_to_analyze', ['det_a']
+        )
+        top_k = tracker_config['poor_performance_analysis'].get('top_k_worst_frames', 20)
+
+        for metric in metrics_to_analyze:
+            print(f"  Analyzing {metric}...")
+            worst_frames = analyze_poor_performance_for_configuration(
+                dataset_root=dataset_root,
+                config_name=config_name,
+                metric_name=metric,
+                top_k=top_k
+            )
+
+            if worst_frames:
+                print(f"    Found {len(worst_frames)} worst frames for {metric}")
 
     # ===== ENHANCED VISUALIZATION AND VIDEO CREATION =====
     if create_video:
