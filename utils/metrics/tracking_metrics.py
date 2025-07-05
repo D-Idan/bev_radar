@@ -527,8 +527,21 @@ def evaluate_tracking_sequence(predictions_csv: str, ground_truth_csv: str,
                                distance_threshold: float = 5.0,
                                iou_threshold: float = 0.3,
                                max_frames: Optional[int] = None,
-                               skip_initial_frames: int = 3) -> Tuple[Path, Dict[str, Any]]:
-    """Evaluate complete tracking sequence and save both JSON and text reports."""
+                               skip_initial_frames: int = 3,
+                               max_frame_gap_time: float = 5.0) -> Tuple[Path, Dict[str, Any]]:
+    """Evaluate complete tracking sequence and save both JSON and text reports.
+    
+    Args:
+        predictions_csv: Path to predictions CSV file
+        ground_truth_csv: Path to ground truth CSV file  
+        tracking_csv: Path to tracking results CSV file
+        output_dir: Directory to save evaluation results
+        distance_threshold: Distance threshold for valid associations
+        iou_threshold: IoU threshold for evaluation
+        max_frames: Maximum number of frames to evaluate
+        skip_initial_frames: Number of initial frames to skip from metrics
+        max_frame_gap_time: Maximum time gap (seconds) before tracks are cleared
+    """
     evaluator = TrackingDetectionEvaluator(
         distance_threshold=distance_threshold,
         iou_threshold=iou_threshold
@@ -552,12 +565,40 @@ def evaluate_tracking_sequence(predictions_csv: str, ground_truth_csv: str,
     if max_frames:
         frame_ids = frame_ids[:max_frames]
 
-    # Evaluate each frame
+    # Identify frames to skip after time gaps
+    frames_to_skip = set()
+    if 'time_gap' in tracking_df.columns:
+        # Find frames that follow large time gaps
+        large_gap_frames = tracking_df[tracking_df['time_gap'] > max_frame_gap_time]['sample_id'].unique()
+        
+        # For each frame after a large gap, skip the next min_hits frames
+        for gap_frame in large_gap_frames:
+            # Find the position of this frame in our evaluation frame list
+            try:
+                gap_idx = frame_ids.index(gap_frame)
+                # Skip the next min_hits frames after the gap
+                for i in range(skip_initial_frames):
+                    if gap_idx + i < len(frame_ids):
+                        frames_to_skip.add(frame_ids[gap_idx + i])
+            except ValueError:
+                # Gap frame not in our evaluation list, skip
+                continue
+        
+        if frames_to_skip:
+            print(f"Skipping {len(frames_to_skip)} frames after large time gaps (>{max_frame_gap_time:.1f}s): {sorted(frames_to_skip)}")
+    else:
+        print(" the column 'time_gap' in tracking_df.columns is missing, check the tracking csv output")
+    # Evaluate each frame (excluding skipped frames)
+    evaluated_frames = []
     for frame_id in frame_ids:
-        pred_frame = predictions_df[predictions_df['sample_id'] == frame_id]
-        gt_frame = ground_truth_df[ground_truth_df['numSample'] == frame_id]
-        track_frame = tracking_df[tracking_df['sample_id'] == frame_id]
-        evaluator.evaluate_frame(pred_frame, gt_frame, track_frame, frame_id)
+        if frame_id not in frames_to_skip:
+            pred_frame = predictions_df[predictions_df['sample_id'] == frame_id]
+            gt_frame = ground_truth_df[ground_truth_df['numSample'] == frame_id]
+            track_frame = tracking_df[tracking_df['sample_id'] == frame_id]
+            evaluator.evaluate_frame(pred_frame, gt_frame, track_frame, frame_id)
+            evaluated_frames.append(frame_id)
+
+    print(f"Evaluated {len(evaluated_frames)} frames (skipped {len(frame_ids) - len(evaluated_frames)} frames total)")
 
     # Save reports
     output_path = Path(output_dir)
