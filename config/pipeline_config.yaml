@@ -62,7 +62,7 @@ tracking:
 
   # Evaluation parameters
   evaluation:
-    max_distance_threshold: 0.4  # Distance threshold for valid associations in evaluation (meters) default: 2.0
+    max_distance_threshold: 0.8  # Distance threshold for valid associations in evaluation (meters) default: 2.0
 
 
 # =============================================================================
