@@ -80,14 +80,26 @@ config_files:
 # =============================================================================
 # PATH CONFIGURATION
 # =============================================================================
+#paths:
+#  # Input data paths
+#  data_dir: "/Volumes/ELEMENTS/datasets/radial"
+#  calibration_table: "/Volumes/ELEMENTS/datasets/radial/CalibrationTable.npy"
+#  labels_path: "/Volumes/ELEMENTS/datasets/radial/labels_CVPR.csv"
+#
+#  # Model path
+#  model_path: "/Volumes/ELEMENTS/datasets/Trained_Models/RADIal_SwinTransformer_ADC.pth"
+#
+#  # Output paths
+#  output_base: "/Volumes/ELEMENTS/datasets/radial/RadIal_Data"
+
 paths:
   # Input data paths
-  data_dir: "/Volumes/ELEMENTS/datasets/radial"
-  calibration_table: "/Volumes/ELEMENTS/datasets/radial/CalibrationTable.npy"
-  labels_path: "/Volumes/ELEMENTS/datasets/radial/labels_CVPR.csv"
+  data_dir: "/mnt/data/datasets/radial/gd/raw_data"
+  calibration_table: "/mnt/data/datasets/radial/gd/raw_data/CalibrationTable.npy"
+  labels_path: "/mnt/data/datasets/radial/gd/raw_data/labels_CVPR.csv"
 
   # Model path
-  model_path: "/Volumes/ELEMENTS/datasets/Trained_Models/RADIal_SwinTransformer_ADC.pth"
+  model_path: "/mnt/data/datasets/radial/gd/models/RADIal_SwinTransformer_ADC.pth"
 
   # Output paths
-  output_base: "/Volumes/ELEMENTS/datasets/radial/RadIal_Data"
+  output_base: "/mnt/data/datasets/radial/gd/raw_data/RadIal_Data"
