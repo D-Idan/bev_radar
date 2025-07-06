@@ -189,19 +189,28 @@ class RadarTracker:
             self._remove_out_of_range_tracks()
 
         # Associate detections with tracks using high-confidence detections only
-        matches, unmatched_detections, unmatched_tracks = self._associate(high_conf_detections, frame_dt)
+        matches, unmatched_detections, unmatched_tracks, nearest_distances = (
+            self._associate(high_conf_detections, frame_dt))
+
+        # Reset association flags for all tracks
+        for track in self.tracks:
+            track.has_association_this_frame = False
+            track.nearest_detection_distance = None
 
         # Update matched tracks
-        for track_idx, det_idx in matches:
-            self.tracks[track_idx] = self._update_track(
-                self.tracks[track_idx],
-                high_conf_detections[det_idx],
-                dt=frame_dt  # Pass the calculated time step
-            )
+        for track_idx, det_idx, distance in matches:
+            track = self.tracks[track_idx]
+            track.has_association_this_frame = True  # Mark as associated
+            track = self._update_track(track, high_conf_detections[det_idx],
+                                       dt=frame_dt, association_distance=distance)
+            self.tracks[track_idx] = track
 
         # Handle unmatched tracks
         for track_idx in unmatched_tracks:
             track = self.tracks[track_idx]
+            # Store nearest detection distance from Hungarian algorithm
+            if track_idx in nearest_distances:
+                track.nearest_detection_distance = nearest_distances[track_idx]
             # Update current state to predicted state (if prediction was made)
             if hasattr(track, 'predicted_state') and track.predicted_state is not None:
                 track.state = track.predicted_state.copy()
@@ -409,7 +418,8 @@ class RadarTracker:
 
         self.tracks = tracks_to_keep
 
-    def _associate(self, detections: List[Detection], dt: float) -> Tuple[List[Tuple[int, int]], List[int], List[int]]:
+    def _associate(self, detections: List[Detection], dt: float) -> Tuple[
+        List[Tuple[int, int, float]], List[int], List[int], Dict[int, float]]:
         """
         Associate detections with existing tracks using Hungarian algorithm.
         Updated to use dynamic distance threshold.
@@ -419,16 +429,18 @@ class RadarTracker:
             dt: Time step for this frame (used for dynamic thresholding)
 
         Returns:
-            Tuple of (matches, unmatched_detections, unmatched_tracks)
+            Tuple of (matches, unmatched_detections, unmatched_tracks, nearest_distances)
+            where nearest_distances is Dict[track_idx -> nearest_detection_distance]
         """
         if not self.tracks or not detections:
-            return [], list(range(len(detections))), list(range(len(self.tracks)))
+            return [], list(range(len(detections))), list(range(len(self.tracks))), {}
 
         # Calculate dynamic distance threshold
         distance_threshold = self.max_velocity_ms * dt
 
         # Create cost matrix using selected strategy
         cost_matrix = self._create_cost_matrix(detections, distance_threshold)
+        nearest_distances = {}  # track_idx -> nearest_distance
 
         if cost_matrix.size > 0:
             # Apply Hungarian algorithm
@@ -437,24 +449,34 @@ class RadarTracker:
             # Filter matches by distance threshold and confidence requirements
             matches = []
             for t_idx, d_idx in zip(track_indices, det_indices):
+                distance = cost_matrix[t_idx, d_idx]
                 if self._is_valid_association(cost_matrix[t_idx, d_idx], detections[d_idx], distance_threshold, t_idx):
-                    matches.append((t_idx, d_idx))
+                    matches.append((t_idx, d_idx, distance))
 
             # Find unmatched tracks and detections
-            matched_tracks = {t_idx for t_idx, _ in matches}
-            matched_detections = {d_idx for _, d_idx in matches}
+            matched_tracks = {t_idx for t_idx, _, _ in matches}
+            matched_detections = {d_idx for _, d_idx, _ in matches}
 
             unmatched_tracks = [t for t in range(len(self.tracks))
                                 if t not in matched_tracks]
             unmatched_detections = [d for d in range(len(detections))
                                     if d not in matched_detections]
+
+            # Extract nearest detection distance for unmatched tracks from cost matrix
+            for track_idx in unmatched_tracks:
+                # Find minimum distance in this track's row (excluding LARGE_COST values)
+                track_distances = cost_matrix[track_idx, :]
+                valid_distances = track_distances[track_distances < self.LARGE_COST]
+                if len(valid_distances) > 0:
+                    nearest_distances[track_idx] = float(np.min(valid_distances))
+
         else:
             # No valid associations possible
             matches = []
             unmatched_tracks = list(range(len(self.tracks)))
             unmatched_detections = list(range(len(detections)))
 
-        return matches, unmatched_detections, unmatched_tracks
+        return matches, unmatched_detections, unmatched_tracks, nearest_distances
 
     def _create_cost_matrix(self, detections: List[Detection], distance_threshold: float) -> np.ndarray:
         """
@@ -588,7 +610,8 @@ class RadarTracker:
             print(f"Checking cost {cost:.2f} against distance threshold {distance_threshold:.2f}")
             return cost <= distance_threshold
 
-    def _update_track(self, track: Track, detection: Detection, dt: float = None) -> Track:
+    def _update_track(self, track: Track, detection: Detection, dt: float = None,
+                      association_distance: Optional[float] = None) -> Track:
         """
         Update track with associated detection using confidence-weighted R.
 
@@ -596,6 +619,7 @@ class RadarTracker:
             track: Track to update
             detection: Detection to use for update
             dt: Time step for this update (if None, uses self.base_dt)
+            association_distance: store distance information for associated detection
 
         Returns:
             Updated track
@@ -664,6 +688,10 @@ class RadarTracker:
         # Update track timestamp
         if hasattr(detection, 'timestamp'):
             self.track_last_update_times[track.id] = detection.timestamp
+
+        # Store association distance in track
+        track.last_association_distance = association_distance
+        track.last_association_strategy = self.association_strategy.value
 
         return track
 

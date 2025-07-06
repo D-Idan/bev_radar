@@ -319,6 +319,17 @@ def offline_tracking(
             if last_det is None:
                 continue
 
+            # Get association distance and strategy
+            association_distance = getattr(track, 'last_association_distance', np.nan)
+            association_strategy = getattr(track, 'last_association_strategy', 'unknown')
+
+            # Determine distance type based on strategy
+            distance_type = 'euclidean'
+            if association_strategy == 'mahalanobis_distance':
+                distance_type = 'mahalanobis'
+            elif association_strategy in ['confidence_weighted', 'hybrid_score']:
+                distance_type = 'weighted_euclidean'
+
             rid = getattr(last_det, '_detection_id', -1)
             r = float(last_det.range_m)
             az = float(np.degrees(last_det.azimuth_rad))
@@ -337,6 +348,11 @@ def offline_tracking(
                 'track_state': track.state.name if hasattr(track.state, 'name') else str(track.state),
                 'timestamp': timestamp_s,
                 'time_gap': gap if prev_timestamp else 0.0,
+
+                'association_distance': float(association_distance) if not np.isnan(association_distance) else np.nan,
+                'distance_type': distance_type,
+                'association_strategy': association_strategy,
+
                 # x1..y4 left as NaN placeholders; replace if you have pixel‐corner data
                 'x1': np.nan, 'y1': np.nan,
                 'x2': np.nan, 'y2': np.nan,
@@ -363,6 +379,7 @@ def offline_tracking(
         'sample_id', 'frame_id', 'timestamp', 'time_gap', 'track_id',
         'detection_id', 'confidence', 'range_m', 'azimuth_deg',
         'track_age', 'hits', 'track_state',
+        'association_distance', 'distance_type', 'association_strategy',
         'x1', 'y1', 'x2', 'y2', 'x3', 'y3', 'x4', 'y4'
     ]
     track_df = track_df[cols]

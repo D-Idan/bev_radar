@@ -68,6 +68,12 @@ class Track:
     time_since_update: int = 0
     confidence: float = 0.0
 
+    # Association distance tracking
+    last_association_distance: Optional[float] = None
+    last_association_strategy: Optional[str] = None
+    nearest_detection_distance: Optional[float] = None
+    has_association_this_frame: bool = False  # Flag to know if associated this frame
+
     @property
     def position(self) -> Tuple[float, float]:
         """Get current position estimate."""

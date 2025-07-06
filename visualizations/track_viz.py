@@ -25,6 +25,7 @@ def visualize_frame_radar_azimuth(
         output_dir: str,
         show_coverage_bounds: bool = True,
         show_confidence_ellipses: bool = True,
+        show_association_distances: bool = True,
         radar_config: Optional[dict] = None,
 ):
     """
@@ -149,7 +150,74 @@ def visualize_frame_radar_azimuth(
             # Plot track position (update state)
             ax.scatter(az_tr, rng_tr, marker='^', s=50, facecolors='none', edgecolors='red',
                        linewidths=0.8, label='Track Position' if i == 0 else "")
-            ax.text(az_tr + 0.2, rng_tr + 0.2, f"T{track.id}", color='red', fontsize=8)
+
+            # Add track ID and distance annotation
+            track_text = f"T{track.id}"
+
+            # Show distance information based on association status
+            if show_association_distances:
+                if hasattr(track, 'has_association_this_frame') and track.has_association_this_frame:
+                    # Track was associated - show association distance
+                    if hasattr(track, 'last_association_distance') and not np.isnan(track.last_association_distance):
+                        distance = track.last_association_distance
+                        strategy = getattr(track, 'last_association_strategy', 'unknown')
+
+                        distance_text = f"\nd={distance:.2f}"
+                        if strategy == 'mahalanobis_distance':
+                            distance_text += " (χ²)"
+                        elif 'confidence' in strategy:
+                            distance_text += " (conf)"
+                        track_text += distance_text
+                else:
+                    # Track was NOT associated - show nearest detection distance
+                    if hasattr(track, 'nearest_detection_distance') and track.nearest_detection_distance is not None:
+                        distance = track.nearest_detection_distance
+                        strategy = getattr(track, 'last_association_strategy', 'unknown')
+
+                        distance_text = f"\nd={distance:.2f}"
+                        if strategy == 'mahalanobis_distance':
+                            distance_text += " (χ²✗)"  # X mark to indicate failed gating
+                        else:
+                            distance_text += " (✗)"
+                        track_text += distance_text
+
+            # Position text with smart offset
+            if is_zoomed:
+                text_offset_az = 0.1
+                text_offset_rng = 0.5
+                fontsize = 7
+            else:
+                text_offset_az = 0.5
+                text_offset_rng = 2.0
+                fontsize = 8
+
+            text_az = az_tr + text_offset_az
+            text_rng = rng_tr + text_offset_rng
+
+            # Color-code text based on association status
+            if hasattr(track, 'has_association_this_frame') and track.has_association_this_frame:
+                text_color = 'darkred'  # Associated track
+                edge_color = 'red'
+                bg_color = 'white'
+            else:
+                text_color = 'darkorange'  # Unassociated track
+                edge_color = 'orange'
+                bg_color = 'lightyellow'
+
+            ax.text(text_az, text_rng, track_text, color=text_color,
+                    fontsize=fontsize, fontweight='bold',
+                    bbox=dict(boxstyle='round,pad=0.3',
+                              facecolor=bg_color,
+                              alpha=0.9,
+                              edgecolor=edge_color,
+                              linewidth=1),
+                    ha='left', va='bottom')
+
+            # Add a thin line connecting text to track point
+            if show_association_distances and hasattr(track, 'last_association_distance'):
+                if not np.isnan(track.last_association_distance):
+                    ax.plot([az_tr, text_az], [rng_tr, text_rng],
+                            color='red', linewidth=0.5, alpha=0.6, linestyle=':')
 
             # Plot prediction state if available
             if hasattr(track, 'predicted_state') and track.predicted_state is not None:
