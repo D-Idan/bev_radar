@@ -501,7 +501,7 @@ class RadarTracker:
                 distance = euclidean_distance(track_pos, det_pos)
 
                 # Use distance-only for early tracks (hits <= 1)
-                if track.hits <= 1:
+                if track.hits < 1:
                     cost_matrix[t, d] = distance
 
                 # Use Mahalanobis for mature tracks (hits > 1)
@@ -594,7 +594,7 @@ class RadarTracker:
         track = self.tracks[track_idx] if track_idx is not None else None
 
         # For early tracks (hits <= 1), use distance threshold
-        if track and track.hits <= 1:
+        if track and track.hits < 1:
             return cost <= distance_threshold
 
         # For Mahalanobis-based strategies, use chi-squared threshold
