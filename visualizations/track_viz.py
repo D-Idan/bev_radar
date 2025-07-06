@@ -38,6 +38,7 @@ def visualize_frame_radar_azimuth(
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8), constrained_layout=True)
 
     # Extract radar parameters from config (with fallback defaults)
+
     if radar_config is None:
         radar_config = {}
 
@@ -46,6 +47,8 @@ def visualize_frame_radar_azimuth(
     max_azimuth = radar_config.get('max_azimuth_deg', 90.0)
     range_buffer = radar_config.get('range_buffer', 10.0)
     azimuth_buffer = radar_config.get('azimuth_buffer_deg', 5.0)
+    measure_std = radar_config['kalman_config']['measurement_noise_std']
+    R_matrix = np.eye(2) * (measure_std ** 2)
 
     # Chi-square thresholds for visualization
     chi2_95 = 5.991
@@ -249,7 +252,7 @@ def visualize_frame_radar_azimuth(
                 if ellipse_center is not None and ellipse_covariance is not None:
                     # Chi-square 95% ellipse (solid red)
                     ellipse_95 = create_chi2_confidence_ellipse_polar(
-                        ellipse_center, ellipse_covariance, chi2_95,
+                        ellipse_center, ellipse_covariance, chi2_95, R_matrix,
                         color='red', alpha=0.15, linestyle='-', linewidth=1
                     )
                     if ellipse_95:
@@ -261,7 +264,7 @@ def visualize_frame_radar_azimuth(
 
                     # Chi-square 99% ellipse (dashed orange)
                     ellipse_99 = create_chi2_confidence_ellipse_polar(
-                        ellipse_center, ellipse_covariance, chi2_99,
+                        ellipse_center, ellipse_covariance, chi2_99, R_matrix,
                         color='orange', alpha=0.12, linestyle='--', linewidth=1.5
                     )
                     if ellipse_99:
@@ -273,7 +276,7 @@ def visualize_frame_radar_azimuth(
 
                     # Chi-square 99.9% ellipse (dotted purple)
                     ellipse_99_9 = create_chi2_confidence_ellipse_polar(
-                        ellipse_center, ellipse_covariance, chi2_99_9,
+                        ellipse_center, ellipse_covariance, chi2_99_9, R_matrix,
                         color='purple', alpha=0.1, linestyle=':', linewidth=2
                     )
                     if ellipse_99_9:
@@ -357,6 +360,7 @@ def visualize_frame_radar_azimuth(
 def create_chi2_confidence_ellipse_polar(position: Tuple[float, float],
                                          covariance: np.ndarray,
                                          chi2_threshold: float,
+                                         measurement_noise_R: Optional[np.ndarray] = None,
                                          color: str = 'red',
                                          alpha: float = 0.3,
                                          linestyle: str = '-',
@@ -370,8 +374,16 @@ def create_chi2_confidence_ellipse_polar(position: Tuple[float, float],
         range_m, azimuth_rad = cartesian_to_polar(position[0], position[1])
         azimuth_deg = np.degrees(azimuth_rad)
 
+        # Calculate innovation covariance if R is provided
+        if measurement_noise_R is not None:
+            # S = HPH^T + R, where H = [[1,0,0,0],[0,1,0,0]] extracts position
+            # So HPH^T is just the 2x2 position covariance
+            innovation_cov = covariance + measurement_noise_R
+        else:
+            innovation_cov = covariance
+
         # Eigenvalues and eigenvectors of covariance
-        eigenvals, eigenvecs = np.linalg.eigh(covariance)
+        eigenvals, eigenvecs = np.linalg.eigh(innovation_cov)
 
         # Convert eigenvalues to ellipse dimensions using chi-square threshold
         width = 2 * np.sqrt(chi2_threshold * eigenvals[0])
