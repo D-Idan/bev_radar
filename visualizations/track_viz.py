@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from adjustText import adjust_text
 from matplotlib import cm
 import numpy as np
 from pathlib import Path
@@ -17,12 +18,39 @@ def prepare_output_directories(output_dir: str):
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
 
+def get_text_position_and_style(az, rng, is_zoomed=False):
+    """
+    Calculate smart text positioning and styling based on zoom level.
+
+    Args:
+        az: Azimuth position (degrees)
+        rng: Range position (meters)
+        is_zoomed: Whether this is for the zoomed view
+
+    Returns:
+        tuple: (text_az, text_rng, fontsize, text_offset_az, text_offset_rng)
+    """
+    if is_zoomed:
+        text_offset_az = 0.1
+        text_offset_rng = 0.5
+        fontsize = 7
+    else:
+        text_offset_az = 0.5
+        text_offset_rng = 2.0
+        fontsize = 8
+
+    text_az = az + text_offset_az
+    text_rng = rng + text_offset_rng
+
+    return text_az, text_rng, fontsize, text_offset_az, text_offset_rng
+
 def visualize_frame_radar_azimuth(
         frame_id: int,
         detections: List[Detection],
         ground_truth: List[Detection],
         active_tracks: List[Track],
         output_dir: str,
+        tracker_instance=None,
         show_coverage_bounds: bool = True,
         show_confidence_ellipses: bool = True,
         show_association_distances: bool = True,
@@ -116,6 +144,142 @@ def visualize_frame_radar_azimuth(
             ax.fill([max_azimuth, display_max_azimuth, display_max_azimuth, max_azimuth],
                     [0, 0, display_max_range, display_max_range], color='red', alpha=0.1)
 
+        # Plot pre-track association info if available
+        if tracker_instance and hasattr(tracker_instance, 'last_frame_info'):
+            frame_info = tracker_instance.last_frame_info
+
+            # Plot low confidence detections (filtered out)
+            if frame_info.get('low_conf_detections'):
+                for det in frame_info['low_conf_detections']:
+                    az = np.degrees(det.azimuth_rad)
+                    rng = det.range_m
+                    # Gray squares with X for filtered detections
+                    ax.scatter(az, rng, c='gray', marker='s', s=30, alpha=0.3)
+                    ax.scatter(az, rng, c='red', marker='x', s=20, alpha=0.5)
+
+                    # Add annotation
+                    ax.annotate(f'C:{det.confidence:.2f}\n(filtered)',
+                                (az, rng),
+                                xytext=(az + 0.5, rng + 2),
+                                fontsize=6,
+                                color='gray',
+                                bbox=dict(boxstyle='round,pad=0.2',
+                                          facecolor='white',
+                                          alpha=0.7,
+                                          edgecolor='gray'))
+
+            # Plot track initiation decisions
+            if frame_info.get('track_init_decisions'):
+                for decision in frame_info['track_init_decisions']:
+                    det = decision['detection']
+                    az = np.degrees(det.azimuth_rad)
+                    rng = det.range_m
+
+                    if decision['track_created']:
+                        if not is_zoomed:
+                            # Green circle for new tracks (only on original plot)
+                            ax.scatter(az, rng, facecolors='none', edgecolors='green',
+                                       marker='o', s=100, linewidth=2, alpha=0.8)
+                        else:
+                            # Annotation only on zoom plot
+                            text_az, text_rng, fontsize, _, _ = get_text_position_and_style(az, rng, is_zoomed)
+                            ax.annotate(f'NEW T{decision["new_track_id"]}',
+                                        (az, rng),
+                                        xytext=(text_az, text_rng),
+                                        fontsize=fontsize,
+                                        color='green',
+                                        fontweight='bold',
+                                        bbox=dict(boxstyle='round,pad=0.3',
+                                                  facecolor='lightgreen',
+                                                  alpha=0.8),
+                                        arrowprops=dict(arrowstyle='->',
+                                                        connectionstyle='arc3,rad=0.1',
+                                                        color='green',
+                                                        linewidth=0.8,
+                                                        alpha=0.6))
+                    else:
+                        if not is_zoomed:
+                            # Orange dashed circle for rejected new tracks (only on original plot)
+                            circle = plt.Circle((az, rng), 1.5, fill=False,
+                                                edgecolor='orange', linestyle='--',
+                                                linewidth=1.5, alpha=0.6)
+                            ax.add_patch(circle)
+                        else:
+                            # Annotation only on zoom plot
+                            text_az, text_rng, fontsize, _, _ = get_text_position_and_style(az, rng, is_zoomed)
+
+                            reason = decision.get('reason', 'unknown')
+                            reason_text = {
+                                'low_confidence': f'C:{det.confidence:.2f}<{tracker_instance.min_confidence_init}',
+                                'outside_coverage': 'Out of range'
+                            }.get(reason, reason)
+
+                            ax.annotate(f'No track:\n{reason_text}',
+                                        (az, rng),
+                                        xytext=(text_az, text_rng),
+                                        fontsize=fontsize,
+                                        color='orange',
+                                        bbox=dict(boxstyle='round,pad=0.2',
+                                                  facecolor='lightyellow',
+                                                  alpha=0.8,
+                                                  edgecolor='orange'),
+                                        arrowprops=dict(arrowstyle='->',
+                                                        connectionstyle='arc3,rad=0.1',
+                                                        color='orange',
+                                                        linewidth=0.8,
+                                                        alpha=0.6))
+
+        # Plot tentative track associations (show on both plots but with different detail levels)
+        if tracker_instance and hasattr(tracker_instance, 'last_frame_info'):
+            frame_info = tracker_instance.last_frame_info
+
+            # Get all tracks (not just confirmed ones)
+            all_tracks_list = tracker_instance.get_all_tracks() if hasattr(tracker_instance, 'get_all_tracks') else []
+
+            # Plot ONLY tentative associations (combines detection + track info)
+            if frame_info.get('tentative_associations'):
+                for assoc in frame_info['tentative_associations']:
+                    det = assoc['detection']
+                    track = assoc['track']
+                    distance = assoc['distance']
+
+                    az_det = np.degrees(det.azimuth_rad)
+                    rng_det = det.range_m
+
+                    # Get track position
+                    range_tr, azimuth_tr = track.kalman_polar_position
+                    az_tr = np.degrees(azimuth_tr)
+                    rng_tr = range_tr
+
+                    # Mark the detection with a purple diamond
+                    ax.scatter(az_det, rng_det, marker='D', s=60,
+                               facecolors='none', edgecolors='purple',
+                               linewidths=1.5, alpha=0.8)
+
+                    # Add annotation (different detail level based on zoom)
+                    if is_zoomed:
+                        # More detailed annotation for zoomed view
+                        annotation_text = f'T{track.id} (tentative)\nh:{track.hits}/{tracker_instance.min_hits}'
+                        if assoc['distance'] < float('inf'):
+                            annotation_text += f'\nd:{distance:.2f}'
+
+                        text_az, text_rng, fontsize, _, _ = get_text_position_and_style(az_tr, rng_tr, is_zoomed)
+
+                        ax.annotate(annotation_text,
+                                    (az_det, rng_det),
+                                    xytext=(text_az, text_rng),
+                                    fontsize=fontsize,
+                                    color='purple',
+                                    bbox=dict(boxstyle='round,pad=0.2',
+                                              facecolor='lavender',
+                                              alpha=0.8,
+                                              edgecolor='purple'),
+                                    arrowprops=dict(arrowstyle='->',
+                                                    connectionstyle='arc3,rad=0.1',
+                                                    color='purple',
+                                                    linewidth=0.8,
+                                                    alpha=0.6))
+
         # Plot network output (blue circles)
         scatter = None
         if detections:
@@ -143,6 +307,11 @@ def visualize_frame_radar_azimuth(
         has_chi2_95 = False
         has_chi2_99 = False
         has_chi2_99_9 = False
+
+        # Collect all text annotations for adjustment
+        texts = []
+        points_x = []
+        points_y = []
 
         # Plot tracks with multiple threshold ellipses
         for i, track in enumerate(active_tracks):
@@ -185,17 +354,7 @@ def visualize_frame_radar_azimuth(
                         track_text += distance_text
 
             # Position text with smart offset
-            if is_zoomed:
-                text_offset_az = 0.1
-                text_offset_rng = 0.5
-                fontsize = 7
-            else:
-                text_offset_az = 0.5
-                text_offset_rng = 2.0
-                fontsize = 8
-
-            text_az = az_tr + text_offset_az
-            text_rng = rng_tr + text_offset_rng
+            text_az, text_rng, fontsize, _, _ = get_text_position_and_style(az_tr, rng_tr, is_zoomed)
 
             # Color-code text based on association status
             if hasattr(track, 'has_association_this_frame') and track.has_association_this_frame:
@@ -207,20 +366,19 @@ def visualize_frame_radar_azimuth(
                 edge_color = 'orange'
                 bg_color = 'lightyellow'
 
-            ax.text(text_az, text_rng, track_text, color=text_color,
-                    fontsize=fontsize, fontweight='bold',
-                    bbox=dict(boxstyle='round,pad=0.3',
-                              facecolor=bg_color,
-                              alpha=0.9,
-                              edgecolor=edge_color,
-                              linewidth=1),
-                    ha='left', va='bottom')
-
-            # Add a thin line connecting text to track point
-            if show_association_distances and hasattr(track, 'last_association_distance'):
-                if not np.isnan(track.last_association_distance):
-                    ax.plot([az_tr, text_az], [rng_tr, text_rng],
-                            color='red', linewidth=0.5, alpha=0.6, linestyle=':')
+            if not is_zoomed:
+                # Create text object but don't position it yet
+                text = ax.text(az_tr, rng_tr, track_text, color=text_color,
+                               fontsize=fontsize, fontweight='bold',
+                               bbox=dict(boxstyle='round,pad=0.3',
+                                         facecolor=bg_color,
+                                         alpha=0.9,
+                                         edgecolor=edge_color,
+                                         linewidth=1),
+                               ha='left', va='bottom')
+                texts.append(text)
+                points_x.append(az_tr)
+                points_y.append(rng_tr)
 
             # Plot prediction state if available
             if hasattr(track, 'predicted_state') and track.predicted_state is not None:
@@ -285,6 +443,23 @@ def visualize_frame_radar_azimuth(
                             ax.scatter([], [], c='purple', alpha=0.1, s=80, marker='^',
                                        label=f'χ² 99.9% ({chi2_99_9:.3f})')
                             has_chi2_99_9 = True
+
+        # Adjust all text positions to avoid overlaps
+        if texts and not is_zoomed:
+            adjust_text(texts,
+                        x=points_x, y=points_y,
+                        arrowprops=dict(arrowstyle='->', color='red', alpha=0.6, lw=0.5,
+                                        shrinkA=10, shrinkB=5),
+                        ax=ax,
+                        expand_text=(1.2, 1.4),  # Expand text boxes
+                        expand_points=(1.5, 1.5),  # Keep distance from points
+                        force_text=(0.5, 0.5),  # Force between texts
+                        force_points=(0.2, 0.2),  # Force from points
+                        avoid_text=True,
+                        avoid_points=True,
+                        avoid_self=True,
+                        only_move={'points': 'y', 'text': 'xy'},
+                        )
 
         return scatter
 

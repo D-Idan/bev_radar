@@ -370,6 +370,7 @@ def offline_tracking(
             ground_truth=ground_truth,
             active_tracks=active_tracks,
             output_dir=str(output_paths['frame_images']),
+            tracker_instance=manager.tracker,
             radar_config=config
         )
 

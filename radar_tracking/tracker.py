@@ -176,6 +176,18 @@ class RadarTracker:
         high_conf_detections = [det for det in detections
                                 if det.confidence >= self.min_confidence_assoc]
 
+        # Track which detections were filtered out
+        low_conf_detections = [det for det in detections
+                               if det.confidence < self.min_confidence_assoc]
+
+        # Store pre-track info for visualization
+        self.last_frame_info = {
+            'all_detections': detections,
+            'high_conf_detections': high_conf_detections,
+            'low_conf_detections': low_conf_detections,
+            'track_init_decisions': []  # Will be populated during track creation
+        }
+
         # Perform predictions based on actual time gap
         if current_time is not None:
             # Use timestamp-aware prediction for better handling of time gaps
@@ -198,12 +210,26 @@ class RadarTracker:
             track.nearest_detection_distance = None
 
         # Update matched tracks
+        tentative_associations = [] # Store information about tentative track associations
         for track_idx, det_idx, distance in matches:
             track = self.tracks[track_idx]
             track.has_association_this_frame = True  # Mark as associated
             track = self._update_track(track, high_conf_detections[det_idx],
                                        dt=frame_dt, association_distance=distance)
             self.tracks[track_idx] = track
+
+            if track.hits < self.min_hits:  # This is a tentative track
+                tentative_associations.append({
+                    'track': track,
+                    'detection': high_conf_detections[det_idx],
+                    'distance': distance,
+                    'track_hits': track.hits,
+                    'track_age': track.age
+                })
+
+        # Store in last_frame_info for visualization
+        self.last_frame_info['tentative_associations'] = tentative_associations
+
 
         # Handle unmatched tracks
         for track_idx in unmatched_tracks:
@@ -222,10 +248,29 @@ class RadarTracker:
         # Create new tracks from unmatched detections (apply confidence threshold)
         for det_idx in unmatched_detections:
             detection = high_conf_detections[det_idx]
+
+            # Track decision for visualization
+            decision = {
+                'detection': detection,
+                'confidence': detection.confidence,
+                'passed_init_threshold': detection.confidence >= self.min_confidence_init,
+                'within_coverage': self._is_within_radar_coverage(detection)
+            }
+
             if detection.confidence >= self.min_confidence_init:
                 # Additional check: only create tracks for detections within radar coverage
                 if self._is_within_radar_coverage(detection):
                     self._initiate_track(detection)
+                    decision['track_created'] = True
+                    decision['new_track_id'] = self.next_id - 1
+                else:
+                    decision['track_created'] = False
+                    decision['reason'] = 'outside_coverage'
+            else:
+                decision['track_created'] = False
+                decision['reason'] = 'low_confidence'
+
+            self.last_frame_info['track_init_decisions'].append(decision)
 
         # Remove dead tracks
         self._remove_dead_tracks()
