@@ -176,7 +176,7 @@ class RadarKalmanFilter:
         # Get confidence-weighted R matrix
         if confidence is not None:
             R_weighted = self.get_confidence_weighted_R(confidence, r_strategy, strategy_params,
-                                                        invert_confidence=False) # Use for update
+                                                        return_confidence_factor=False) # Use for update
         else:
             R_weighted = self.R
 
@@ -225,25 +225,25 @@ class RadarKalmanFilter:
         # Innovation
         innovation = z - z_pred
 
-        # Get appropriate R matrix (adaptive or standard)
+        # Get confidence factor
         if confidence is not None:
-            R_matrix = self.get_confidence_weighted_R(confidence, r_strategy, strategy_params,
-                                                      invert_confidence=True,  # Invert for gating
+            cf = self.get_confidence_weighted_R(confidence, r_strategy, strategy_params,
+                                                      return_confidence_factor=True,  # Invert for gating
             )
         else:
-            R_matrix = self.R
+            cf = np.array(1)
 
         # Innovation covariance
-        innovation_cov = self.H @ covariance @ self.H.T + R_matrix
+        innovation_cov = self.H @ covariance @ self.H.T + self.R
 
         # Mahalanobis distance
-        distance = innovation.T @ np.linalg.inv(innovation_cov) @ innovation
+        distance = innovation.T @ np.linalg.inv(innovation_cov) @ innovation * cf
 
         return float(distance)
 
     def get_confidence_weighted_R(self, confidence: float, strategy: str = "squared",
                                   strategy_params: dict = None,
-                                  invert_confidence: bool = False) -> np.ndarray:
+                                  return_confidence_factor: bool = False) -> np.ndarray:
         """
         Get measurement noise covariance matrix weighted by detection confidence.
 
@@ -251,7 +251,7 @@ class RadarKalmanFilter:
             confidence: Detection confidence score (0.0 to 1.0)
             strategy: Weighting strategy ("squared", "linear", "stepped")
             strategy_params: Parameters for the specific strategy
-            invert_confidence: If True, use (1-confidence) for gating purposes
+            return_confidence_factor: If True, Return only the confidence_factor
 
         Returns:
             Confidence-weighted R matrix
@@ -298,6 +298,6 @@ class RadarKalmanFilter:
         # INVERT CONFIDENCE FOR GATING
         # Ensure confidence_factor is a numpy-compatible type
         confidence_factor = float(confidence_factor)
-        if invert_confidence:
-            return self.R / confidence_factor # Mahalanobis gating uses inverse scaling
+        if return_confidence_factor:
+            return np.array(confidence_factor) # Mahalanobis gating uses inverse scaling
         return self.R * confidence_factor

@@ -151,9 +151,9 @@ $$\mathbf{R}_{\text{update}} = \mathbf{R}_{\text{base}} \times \alpha(c) \quad (
 **Implementation**:
 ```python
 def get_confidence_weighted_R(self, confidence, strategy="linear", 
-                              strategy_params=None, invert_confidence=False):
+                              strategy_params=None, return_confidence_factor=False):
     # Calculate confidence_factor using selected strategy
-    if invert_confidence:  # For gating
+    if return_confidence_factor:  # For gating
         return self.R / confidence_factor
     return self.R * confidence_factor  # For update
 ```
