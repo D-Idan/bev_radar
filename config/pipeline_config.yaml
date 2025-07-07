@@ -8,9 +8,9 @@
 # =============================================================================
 tracking:
   # Processing options
-  create_video: true # Create video output
+  create_video: false # Create video output
   max_video_samples: null  # null = no limit, integer = limit samples
-  max_frames: null  # null = all frames, integer = limit for debugging
+  max_frames: 204  # null = all frames, integer = limit for debugging
 
   # Poor performance analysis
   poor_performance_analysis:
@@ -22,7 +22,7 @@ tracking:
   lifecycle:
     max_age: 3  # Max frames without detection before track deletion
     min_hits: 3  # Min detections required for track confirmation
-    max_velocity_ms: 83.3  # 300 km/h = 83.3 m/s - max expected object velocity
+    max_velocity_ms: 69.4 # 250 km/h = 69.4 m/s  # 300 km/h = 83.3 m/s - max expected object velocity
 
   # Timing parameters
   timing:
@@ -51,7 +51,7 @@ tracking:
 
   # Mahalanobis distance parameters
   mahalanobis:
-    default_chi2_threshold: 4.605  # 90% confidence (4.605), 95% (5.991), 99% (6.635)
+    default_chi2_threshold: 5.991  # 90% confidence (4.605), 95% (5.991), 99% (6.635)
 
   # Range culling parameters
   range_culling:
