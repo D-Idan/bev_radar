@@ -40,7 +40,7 @@ configurations:
       measurement_noise_std: 0.9
       initial_pos_std: 4.0
       initial_vel_std: 2.0
-      min_hits: 4
+      min_hits: 3
 
 #
 #  adaptive_assoc_squared:

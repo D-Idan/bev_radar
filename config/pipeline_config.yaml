@@ -37,6 +37,7 @@ tracking:
     min_confidence_init: 0.5  # Minimum confidence to create new tracks
     min_confidence_assoc: 0.2  # Minimum confidence for detection-track association
     confidence_weight: 0.3  # Weight factor for confidence in hybrid strategies
+    strict_confidence_for_tentative_tracks: true  # Apply min_confidence_init to tentative track updates
 
   # Adaptive R matrix configuration
   adaptive_r:

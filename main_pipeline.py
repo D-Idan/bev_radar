@@ -230,6 +230,7 @@ class RadarProcessingPipeline:
             'min_confidence_init': self.config['tracking']['association']['min_confidence_init'],
             'min_confidence_assoc': self.config['tracking']['association']['min_confidence_assoc'],
             'confidence_weight': self.config['tracking']['association']['confidence_weight'],
+            'strict_confidence_for_tentative_tracks': self.config['tracking']['association']['strict_confidence_for_tentative_tracks'],
 
             # Adaptive R matrix weighting
             'use_adaptive_r_in_association': self.config['tracking']['adaptive_r']['use_in_association'],

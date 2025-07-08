@@ -47,6 +47,7 @@ class RadarTracker:
         # Confidence-based parameters
         'min_confidence_init': 0.5,
         'min_confidence_assoc': 0.2,
+        'strict_confidence_for_tentative_tracks': False,  # Apply min_confidence_init to tentative track updates
         'confidence_weight': 0.3,
         'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
         'r_weighting_strategy': 'squared',  # "squared", "linear", "stepped"
@@ -95,6 +96,7 @@ class RadarTracker:
         # Confidence-based parameters
         self.min_confidence_init = config['min_confidence_init']
         self.min_confidence_assoc = config['min_confidence_assoc']
+        self.strict_confidence_for_tentative_tracks = config['strict_confidence_for_tentative_tracks']
         self.confidence_weight = config['confidence_weight']
         association_strategy = config['association_strategy']
         self.r_weighting_strategy = config['r_weighting_strategy']
@@ -185,7 +187,8 @@ class RadarTracker:
             'all_detections': detections,
             'high_conf_detections': high_conf_detections,
             'low_conf_detections': low_conf_detections,
-            'track_init_decisions': []  # Will be populated during track creation
+            'track_init_decisions': [],  # Will be populated during track creation
+            'tentative_association_rejections': []
         }
 
         # Perform predictions based on actual time gap
@@ -497,6 +500,22 @@ class RadarTracker:
                 distance = cost_matrix[t_idx, d_idx]
                 if self._is_valid_association(cost_matrix[t_idx, d_idx], detections[d_idx], distance_threshold, t_idx):
                     matches.append((t_idx, d_idx, distance))
+                else:
+                    # Check if this was a tentative track rejection due to strict confidence
+                    track = self.tracks[t_idx]
+                    detection = detections[d_idx]
+
+                    if (self.strict_confidence_for_tentative_tracks and
+                            track.hits < self.min_hits and
+                            detection.confidence >= self.min_confidence_assoc and
+                            detection.confidence < self.min_confidence_init):
+                        self.last_frame_info['tentative_association_rejections'].append({
+                            'track': track,
+                            'detection': detection,
+                            'reason': 'strict_confidence_tentative',
+                            'required_confidence': self.min_confidence_init,
+                            'actual_confidence': detection.confidence
+                        })
 
             # Find unmatched tracks and detections
             matched_tracks = {t_idx for t_idx, _, _ in matches}
@@ -637,6 +656,11 @@ class RadarTracker:
 
         # Get track to check its maturity
         track = self.tracks[track_idx] if track_idx is not None else None
+
+        # Additional confidence check for tentative tracks if enabled
+        if (self.strict_confidence_for_tentative_tracks and track.hits < self.min_hits):
+            if detection.confidence < self.min_confidence_init:
+                return False
 
         # For early tracks (hits <= 1), use distance threshold
         if track and track.hits < 1:

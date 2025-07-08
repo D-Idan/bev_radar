@@ -41,6 +41,7 @@ def setup_tracking_system():
         'min_confidence_init': 0.5,
         'min_confidence_assoc': 0.2,
         'confidence_weight': 0.3,
+        'strict_confidence_for_tentative_tracks': False,
         'association_strategy': 'mahalanobis_distance', #  "mahalanobis_distance", "distance_only", "confidence_weighted", "confidence_gated", "hybrid_score"
 
         # Mahalanobis distance parameters
@@ -575,6 +576,7 @@ if __name__ == "__main__":
         'min_confidence_init': 0.5,  # Minimum confidence to create new tracks
         'min_confidence_assoc': 0.2,  # Minimum confidence for detection-track association
         'confidence_weight': 0.3,  # Weight factor for confidence in hybrid strategies
+        'strict_confidence_for_tentative_tracks': True,  # Enable stricter confidence for tentative tracks
 
         # Confidence-based R matrix weighting
 

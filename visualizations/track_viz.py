@@ -8,6 +8,25 @@ from radar_tracking import Detection, Track
 from copy import deepcopy
 
 
+def get_visualization_config():
+    """
+    Returns consistent color and marker configurations for radar tracking visualizations.
+    Can be used across different visualization functions.
+    """
+    TRACK_COLORS = {
+        'associated': {'color': 'darkred', 'edge': 'red', 'bg': 'white'},
+        'unassociated': {'color': 'darkorange', 'edge': 'orange', 'bg': 'lightyellow'},
+        'prediction': {'color': 'orange', 'edge': 'darkorange'},
+        'tentative': {'color': 'purple', 'edge': 'purple', 'bg': 'lavender'},
+        'rejected': {'color': 'gray', 'edge': 'gray', 'bg': 'lightgray'}
+    }
+
+    CONF_COLORS = ['#c6dbef', '#9ecae1', '#6baed6', '#3182bd', '#08519c'] # 5 distinct blues
+    CONF_LABELS = ['0.0-0.4', '0.4-0.6', '0.6-0.8', '0.8-0.9', '0.9-1.0']
+    CONF_BINS = [0, 0.4, 0.6, 0.8, 0.9, 1.0]
+
+    return TRACK_COLORS, CONF_COLORS, CONF_LABELS, CONF_BINS
+
 def prepare_output_directories(output_dir: str):
     """
     Create output directory structure for visualizations.
@@ -31,13 +50,13 @@ def get_text_position_and_style(az, rng, is_zoomed=False):
         tuple: (text_az, text_rng, fontsize, text_offset_az, text_offset_rng)
     """
     if is_zoomed:
-        text_offset_az = 0.1
-        text_offset_rng = 0.5
-        fontsize = 7
-    else:
         text_offset_az = 0.5
-        text_offset_rng = 2.0
-        fontsize = 8
+        text_offset_rng = 2.5
+        fontsize = 10
+    else:
+        text_offset_az = 2.5
+        text_offset_rng = 8.0
+        fontsize = 11
 
     text_az = az + text_offset_az
     text_rng = rng + text_offset_rng
@@ -77,6 +96,9 @@ def visualize_frame_radar_azimuth(
     azimuth_buffer = radar_config.get('azimuth_buffer_deg', 5.0)
     measure_std = radar_config['kalman_config']['measurement_noise_std']
     R_matrix = np.eye(2) * (measure_std ** 2)
+
+    # Get visualization configuration
+    TRACK_COLORS, CONF_COLORS, CONF_LABELS, CONF_BINS = get_visualization_config()
 
     # Chi-square thresholds for visualization
     chi2_95 = 5.991
@@ -279,6 +301,38 @@ def visualize_frame_radar_azimuth(
                                                     color='purple',
                                                     linewidth=0.8,
                                                     alpha=0.6))
+            # ADD THE NEW CODE HERE - Plot tentative track association rejections due to strict confidence
+            if (frame_info.get('tentative_association_rejections') and
+                    tracker_instance.strict_confidence_for_tentative_tracks):
+                for rejection in frame_info['tentative_association_rejections']:
+                    det = rejection['detection']
+                    track = rejection['track']
+                    az = np.degrees(det.azimuth_rad)
+                    rng = det.range_m
+
+                    if not is_zoomed:
+                        # Red dashed diamond for rejected tentative associations
+                        ax.scatter(az, rng, marker='D', s=80, facecolors='none',
+                                   edgecolors='orange', linestyle='--', linewidth=2, alpha=0.7)
+                    else:
+                        # Detailed annotation for zoom view
+                        text_az, text_rng, fontsize, _, _ = get_text_position_and_style(az, rng, is_zoomed)
+
+                        ax.annotate(
+                            f'T{track.id} (tentative)\nC:{det.confidence:.2f}<{tracker_instance.min_confidence_init}',
+                            (az, rng),
+                            xytext=(text_az, text_rng),
+                            fontsize=fontsize,
+                            color='darkred',
+                            bbox=dict(boxstyle='round,pad=0.3',
+                                      facecolor='mistyrose',
+                                      alpha=0.9,
+                                      edgecolor='orange'),
+                            arrowprops=dict(arrowstyle='->',
+                                            connectionstyle='arc3,rad=0.1',
+                                            color='red',
+                                            linewidth=1,
+                                            alpha=0.7))
 
         # Plot network output (blue circles)
         scatter = None
@@ -288,9 +342,8 @@ def visualize_frame_radar_azimuth(
             conf_det = [d.confidence for d in detections]
 
             # Create 5 discrete blue bins
-            conf_bins = np.digitize(conf_det, bins=[0, 0.4, 0.6, 0.8, 0.9, 1.0]) - 1
-            blue_colors = plt.cm.get_cmap('Blues')(np.linspace(0.3, 1.0, 5))  # 5 blue shades
-            colors = [blue_colors[bin_idx] for bin_idx in conf_bins]
+            conf_bins = np.digitize(conf_det, bins=CONF_BINS) - 1
+            colors = [CONF_COLORS[bin_idx] for bin_idx in conf_bins]
 
             scatter = ax.scatter(az_det, rng_det, c=colors, s=50, alpha=0.8,
                                  label='Network Output')
@@ -357,14 +410,12 @@ def visualize_frame_radar_azimuth(
             text_az, text_rng, fontsize, _, _ = get_text_position_and_style(az_tr, rng_tr, is_zoomed)
 
             # Color-code text based on association status
-            if hasattr(track, 'has_association_this_frame') and track.has_association_this_frame:
-                text_color = 'darkred'  # Associated track
-                edge_color = 'red'
-                bg_color = 'white'
-            else:
-                text_color = 'darkorange'  # Unassociated track
-                edge_color = 'orange'
-                bg_color = 'lightyellow'
+            track_colors = TRACK_COLORS['associated' if (hasattr(track, 'has_association_this_frame')
+                                                         and track.has_association_this_frame)
+            else 'unassociated']
+            text_color = track_colors['color']
+            edge_color = track_colors['edge']
+            bg_color = track_colors['bg']
 
             if not is_zoomed:
                 # Create text object but don't position it yet
@@ -388,7 +439,8 @@ def visualize_frame_radar_azimuth(
                 )
                 pred_az_deg = np.degrees(pred_azimuth)
                 ax.scatter(pred_az_deg, pred_range, marker='o', s=15,
-                           facecolors='orange', edgecolors='darkorange', alpha=0.7,
+                           facecolors=TRACK_COLORS['prediction']['color'],
+                           edgecolors=TRACK_COLORS['prediction']['edge'], alpha=0.7,
                            label='Prediction' if i == 0 else "")
 
             # Draw multiple threshold ellipses if enabled
@@ -491,26 +543,19 @@ def visualize_frame_radar_azimuth(
     ax1.grid(True, alpha=0.3)
     ax2.grid(True, alpha=0.3)
 
-    # Add colorbar for confidence if we have detections
+    # Add discrete colorbar for confidence
     if detections:
         from matplotlib.colors import ListedColormap, BoundaryNorm
-        # Define the actual bin boundaries
-        bin_boundaries = [0, 0.4, 0.6, 0.8, 0.9, 1.0]
-        blue_colors = plt.cm.get_cmap('Blues')(np.linspace(0.3, 1.0, 5))
-        blue_cmap = ListedColormap(blue_colors)
-        # Use BoundaryNorm to map the unequal bins correctly
-        norm = BoundaryNorm(bin_boundaries, blue_cmap.N)
+        conf_cmap = ListedColormap(CONF_COLORS)
+        norm = BoundaryNorm(CONF_BINS, conf_cmap.N)
 
-        sm = plt.cm.ScalarMappable(cmap=blue_cmap, norm=norm)
+        sm = plt.cm.ScalarMappable(cmap=conf_cmap, norm=norm)
         sm.set_array([])
 
-        cbar = fig.colorbar(sm, ax=[ax1, ax2], label='Confidence',
-                            pad=0.02, boundaries=bin_boundaries ,ticks=bin_boundaries)
-        cbar.set_ticklabels([str(i) for i in bin_boundaries])
+        cbar = fig.colorbar(sm, ax=[ax1, ax2], label='Detection Confidence',
+                            ticks=[0.2, 0.5, 0.7, 0.85, 0.95]) # Center of each bin
+        cbar.set_ticklabels(CONF_LABELS)
 
-    # Add legend to the first subplot
-    handles1, labels1 = ax1.get_legend_handles_labels()
-    ax1.legend(handles1, labels1, loc='upper right', fontsize=7, ncol=2)
 
     # Draw rectangle on full view showing zoom area
     if all_azimuths and all_ranges:
@@ -522,7 +567,40 @@ def visualize_frame_radar_azimuth(
                               linestyle=':', alpha=0.7)
         ax1.add_patch(zoom_rect)
         ax1.text(zoom_min_az, zoom_max_range + 2, 'Zoom Area',
-                 fontsize=8, ha='left', style='italic')
+                 fontsize=11, ha='left', style='italic')
+
+    # Create comprehensive legend with consistent entries
+    legend_elements = [
+        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=CONF_COLORS[2],
+                   markersize=8, label='Network Output'),
+        plt.Line2D([0], [0], marker='x', color='green', markersize=10,
+                   label='Ground Truth', linestyle='None'),
+        plt.Line2D([0], [0], marker='^', color='red', markersize=8,
+                   label='Track Position', linestyle='None', markerfacecolor='none'),
+        plt.Line2D([0], [0], marker='o', color=TRACK_COLORS['prediction']['color'],
+                   markersize=6, label='Prediction', linestyle='None'),
+        plt.Line2D([0], [0], marker='D', color=TRACK_COLORS['tentative']['color'],
+                   markersize=8, label='Tentative Track', linestyle='None', markerfacecolor='none'),
+        plt.Line2D([0], [0], marker='o', color='green', markersize=8,
+                   label='New Track', linestyle='None', markerfacecolor='none'),
+        plt.Line2D([0], [0], marker='o', color='orange', markersize=8,
+                   label='Threshold Rejected', linestyle='--', markerfacecolor='none'),
+        # plt.Line2D([0], [0], marker='o', color='orange', markersize=8,
+        #            label='Rejected Track Init', linestyle='--', markerfacecolor='none'),
+        # plt.Line2D([0], [0], marker='D', color='orange', markersize=8,
+        #            label='Rejected Tentative', linestyle='--', markerfacecolor='none'),
+    ]
+
+    # Add ellipse legend entries only if they exist
+    if show_confidence_ellipses:
+        legend_elements.append(plt.Line2D([0], [0], color='red', alpha=0.5,
+                                          label=f'χ² 95% ({chi2_95:.1f})'))
+        legend_elements.append(plt.Line2D([0], [0], color='orange', alpha=0.5,
+                                          linestyle='--', label=f'χ² 99% ({chi2_99:.1f})'))
+        legend_elements.append(plt.Line2D([0], [0], color='purple', alpha=0.5,
+                                          linestyle=':', label=f'χ² 99.9% ({chi2_99_9:.1f})'))
+
+    ax1.legend(handles=legend_elements, loc='upper right', fontsize=10, ncol=4)  # Changed to ncol=3 for more items
 
     plt.suptitle(f"Mahalanobis Distance Tracking - Frame {frame_id:06d}",
                  fontsize=14, fontweight='bold')
