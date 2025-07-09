@@ -8,9 +8,9 @@
 # =============================================================================
 tracking:
   # Processing options
-  create_video: false # Create video output
+  create_video: true # Create video output
   max_video_samples: null  # null = no limit, integer = limit samples
-  max_frames: 204  # null = all frames, integer = limit for debugging
+  max_frames: 170  # null = all frames, integer = limit for debugging
 
   # Poor performance analysis
   poor_performance_analysis:
@@ -27,7 +27,7 @@ tracking:
   # Timing parameters
   timing:
     base_dt: 0.2  # 200ms base time step
-    max_dt_gap: 1.0  # Trigger multi-step prediction for gaps > 1.0s
+    max_dt_gap: 0.3  # Trigger multi-step prediction for gaps > 1.0s
     max_time_without_update: 2.0  # Kill tracks after 1 second without update
     max_frame_gap_time: 4.0  # Kill all tracks if frame gap > 2 seconds
 
@@ -81,26 +81,26 @@ config_files:
 # =============================================================================
 # PATH CONFIGURATION
 # =============================================================================
-#paths:
-#  # Input data paths
-#  data_dir: "/Volumes/ELEMENTS/datasets/radial"
-#  calibration_table: "/Volumes/ELEMENTS/datasets/radial/CalibrationTable.npy"
-#  labels_path: "/Volumes/ELEMENTS/datasets/radial/labels_CVPR.csv"
-#
-#  # Model path
-#  model_path: "/Volumes/ELEMENTS/datasets/Trained_Models/RADIal_SwinTransformer_ADC.pth"
-#
-#  # Output paths
-#  output_base: "/Volumes/ELEMENTS/datasets/radial/RadIal_Data"
-
 paths:
   # Input data paths
-  data_dir: "/mnt/data/datasets/radial/gd/raw_data"
-  calibration_table: "/mnt/data/datasets/radial/gd/raw_data/CalibrationTable.npy"
-  labels_path: "/mnt/data/datasets/radial/gd/raw_data/labels_CVPR.csv"
+  data_dir: "/Volumes/ELEMENTS/datasets/radial"
+  calibration_table: "/Volumes/ELEMENTS/datasets/radial/CalibrationTable.npy"
+  labels_path: "/Volumes/ELEMENTS/datasets/radial/labels_CVPR.csv"
 
   # Model path
-  model_path: "/mnt/data/datasets/radial/gd/models/RADIal_SwinTransformer_ADC.pth"
+  model_path: "/Volumes/ELEMENTS/datasets/Trained_Models/RADIal_SwinTransformer_ADC.pth"
 
   # Output paths
-  output_base: "/mnt/data/datasets/radial/gd/raw_data/RadIal_Data"
+  output_base: "/Volumes/ELEMENTS/datasets/radial/RadIal_Data"
+
+#paths:
+#  # Input data paths
+#  data_dir: "/mnt/data/datasets/radial/gd/raw_data"
+#  calibration_table: "/mnt/data/datasets/radial/gd/raw_data/CalibrationTable.npy"
+#  labels_path: "/mnt/data/datasets/radial/gd/raw_data/labels_CVPR.csv"
+#
+#  # Model path
+#  model_path: "/mnt/data/datasets/radial/gd/models/RADIal_SwinTransformer_ADC.pth"
+#
+#  # Output paths
+#  output_base: "/mnt/data/datasets/radial/gd/raw_data/RadIal_Data"

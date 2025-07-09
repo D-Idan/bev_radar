@@ -114,8 +114,10 @@ class TrackingVisualizationTool:
         # Add legend to camera view
         from matplotlib.patches import Rectangle
         camera_legend = [
-            Rectangle((0, 0), 1, 1, facecolor='blue', alpha=0.7, label='Network Output'),
-            Rectangle((0, 0), 1, 1, facecolor='red', alpha=0.7, label='Tracker State')
+            Rectangle((0, 0), 1, 1, facecolor='none', edgecolor='blue', linewidth=2, alpha=0.7,
+                      label='Network Detection'),
+            Rectangle((0, 0), 1, 1, facecolor='none', edgecolor='red', linewidth=2, alpha=0.7,
+                      label='Corrector')
         ]
         axs[0].legend(handles=camera_legend, loc='upper right', fontsize=12)
 
@@ -269,9 +271,9 @@ class TrackingVisualizationTool:
                                 zorder=16)
 
         ax.scatter([], [], c='blue', marker='o', s=100, alpha=0.7,
-                   edgecolors='darkblue', label='Network Output')
+                   edgecolors='darkblue', label='Network Detection')
         ax.scatter([], [], marker='^', s=100, alpha=0.9, facecolors='none',
-                   edgecolors='red', linewidth=2, label='Tracker State')
+                   edgecolors='red', linewidth=2, label='Corrector')
 
         self._setup_ra_axes_limited(ax, ra_cropped.shape)
 

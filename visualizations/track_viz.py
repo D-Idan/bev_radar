@@ -365,11 +365,11 @@ def visualize_frame_radar_azimuth(
             scatter = ax.scatter(az_det, rng_det, c=colors, s=50, alpha=0.8,
                                  label='Network Output')
 
-        # Plot ground truth (green X)
+        # Plot Labels (green X)
         if ground_truth:
             az_gt = [np.degrees(d.azimuth_rad) for d in ground_truth]
             rng_gt = [d.range_m for d in ground_truth]
-            ax.scatter(az_gt, rng_gt, c='green', marker='x', s=100, label='Ground Truth')
+            ax.scatter(az_gt, rng_gt, c='green', marker='x', s=100, label='Labels')
 
         # Track whether we've added ellipse labels
         has_update_ellipse = False
@@ -391,7 +391,7 @@ def visualize_frame_radar_azimuth(
 
             # Plot track position (update state)
             ax.scatter(az_tr, rng_tr, marker='^', s=50, facecolors='none', edgecolors='red',
-                       linewidths=0.8, label='Track Position' if i == 0 else "")
+                       linewidths=0.8, label='Corrector' if i == 0 else "")
 
             # Add track ID and distance annotation
             track_text = f"T{track.id}"
@@ -591,7 +591,7 @@ def visualize_frame_radar_azimuth(
         plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=CONF_COLORS[2],
                    markersize=8, label='Network Output'),
         plt.Line2D([0], [0], marker='x', color='green', markersize=10,
-                   label='Ground Truth', linestyle='None'),
+                   label='Labels', linestyle='None'),
         plt.Line2D([0], [0], marker='^', color='red', markersize=8,
                    label='Track Position', linestyle='None', markerfacecolor='none'),
         plt.Line2D([0], [0], marker='o', color=TRACK_COLORS['prediction']['color'],
@@ -932,7 +932,7 @@ def visualize_all_frames_3d_overview(
     for frame_idx, frame_id in enumerate(all_frames):
         timestamp = frame_to_time.get(frame_id, frame_id)
 
-        # Ground truth
+        # Labels
         for gt in all_ground_truth[frame_idx]:
             all_gt_times.append(timestamp)
             all_gt_az.append(np.degrees(gt.azimuth_rad))
@@ -975,16 +975,16 @@ def visualize_all_frames_3d_overview(
         fig = plt.figure(figsize=(16, 12))
         ax = fig.add_subplot(111, projection='3d')
 
-        # Plot ground truth and detections
+        # Plot Labels and detections
         if gt_times:
             ax.scatter(gt_times, gt_az, gt_rng, c='green', marker='x', s=40,
-                       alpha=0.7, label='Ground Truth')
+                       alpha=0.7, label='Labels')
         if det_times:
             ax.scatter(det_times, det_az, det_rng, c='blue', s=15,
                        alpha=0.5, label='Detections')
 
         # Plot tracks with stored states - simplified legend
-        legend_entries = ['Ground Truth', 'Detections']
+        legend_entries = ['Labels', 'Detections']
         has_updates = False
         has_predictions = False
 
@@ -1186,7 +1186,8 @@ def visualize_tracking_temporal_evolution(
                       edgecolors=VizConfig.TRACKS['edgecolors'],
                       linewidth=VizConfig.TRACKS['linewidth'] * 2,  # Thicker edges for visibility
                       alpha=VizConfig.TRACKS['alpha'],
-                      label=f'Track {track_id} (Kalman Updates)',
+                      label=f'Corrector',
+                      # label=f'Track {track_id} (Kalman Updates)',
                       zorder=3)
 
         # Plot prediction states (markers only - orange circles)
@@ -1199,7 +1200,7 @@ def visualize_tracking_temporal_evolution(
                       edgecolor=VizConfig.PREDICTIONS['edgecolor'],
                       linewidth=VizConfig.PREDICTIONS['linewidth'],
                       alpha=VizConfig.PREDICTIONS['alpha'],
-                      label=f'Track {track_id} (Kalman Predictions)',
+                      label=f'Prediction',
                       zorder=2)
 
         # Plot raw detections (blue circles)
@@ -1211,7 +1212,7 @@ def visualize_tracking_temporal_evolution(
                        marker=VizConfig.DETECTIONS['marker'],
                        edgecolors=VizConfig.DETECTIONS['edgecolor'],
                        linewidth=VizConfig.DETECTIONS['linewidth'],
-                       label=f'Track {track_id} (Raw Detections)',
+                       label=f'Network Detections',
                        zorder=4)
 
         # Mark significant time gaps
@@ -1266,7 +1267,7 @@ def visualize_tracking_temporal_evolution(
 
         ax.text(0.02, 0.02, stats_text, transform=ax.transAxes,
                 bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8),
-                fontsize=9, verticalalignment='top')
+                fontsize=9, verticalalignment='bottom')
 
     # Set x-label on bottom subplot
     if axes.any():
