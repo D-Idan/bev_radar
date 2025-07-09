@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from radar_tracking import Detection, Track
 from copy import deepcopy
+from visualization_config import VisualizationConfig as VizConfig
 
 
 def get_visualization_config():
@@ -175,20 +176,36 @@ def visualize_frame_radar_azimuth(
                 for det in frame_info['low_conf_detections']:
                     az = np.degrees(det.azimuth_rad)
                     rng = det.range_m
-                    # Gray squares with X for filtered detections
-                    ax.scatter(az, rng, c='gray', marker='s', s=30, alpha=0.3)
-                    ax.scatter(az, rng, c='red', marker='x', s=20, alpha=0.5)
 
-                    # Add annotation
-                    ax.annotate(f'C:{det.confidence:.2f}\n(filtered)',
-                                (az, rng),
-                                xytext=(az + 0.5, rng + 2),
-                                fontsize=6,
-                                color='gray',
-                                bbox=dict(boxstyle='round,pad=0.2',
-                                          facecolor='white',
-                                          alpha=0.7,
-                                          edgecolor='gray'))
+                    # Filtered because the detection confidance is:
+                    # min_confidence_assoc > detection confidance > min_confidence_init
+                    if not is_zoomed:
+                        # Orange dashed circle for rejected low-confidence detections (only on original plot)
+                        circle = plt.Circle((az, rng), 1.5, fill=False,
+                                            edgecolor='orange', linestyle='--',
+                                            linewidth=1.5, alpha=0.6)
+                        ax.add_patch(circle)
+                    else:
+                        # Annotation only on zoom plot, styled like other rejections
+                        text_az, text_rng, fontsize, _, _ = get_text_position_and_style(az, rng, is_zoomed)
+
+                        # Create the specific text for this rejection reason
+                        reason_text = f'No Assoc/Init:\nC:{tracker_instance.min_confidence_assoc}<{det.confidence:.2f}<{tracker_instance.min_confidence_init}'
+
+                        ax.annotate(reason_text,
+                                    (az, rng),
+                                    xytext=(text_az, text_rng),
+                                    fontsize=fontsize,
+                                    color='orange',
+                                    bbox=dict(boxstyle='round,pad=0.2',
+                                              facecolor='lightyellow',
+                                              alpha=0.8,
+                                              edgecolor='orange'),
+                                    arrowprops=dict(arrowstyle='->',
+                                                  connectionstyle='arc3,rad=0.1',
+                                                  color='orange',
+                                                  linewidth=0.8,
+                                                  alpha=0.6))
 
             # Plot track initiation decisions
             if frame_info.get('track_init_decisions'):
@@ -236,7 +253,7 @@ def visualize_frame_radar_azimuth(
                                 'outside_coverage': 'Out of range'
                             }.get(reason, reason)
 
-                            ax.annotate(f'No track:\n{reason_text}',
+                            ax.annotate(f'No track Init:\n{reason_text}',
                                         (az, rng),
                                         xytext=(text_az, text_rng),
                                         fontsize=fontsize,
@@ -1120,8 +1137,6 @@ def visualize_tracking_temporal_evolution(
     if num_tracks == 1:
         axes = [axes]
 
-    colors = ['red', 'blue', 'green', 'orange', 'purple']
-
     for i, (track_id, track_history) in enumerate(longest_tracks):
         if i >= len(axes):
             break
@@ -1161,26 +1176,43 @@ def visualize_tracking_temporal_evolution(
         detection_times = [item[0] for item in detection_data]
         detection_ranges = [item[1] for item in detection_data]
 
-        # Plot update states (solid line with circles)
+        # Plot update states (markers only - red triangles)
         if update_times and update_ranges:
-            ax.plot(update_times, update_ranges, color=colors[i % len(colors)],
-                    linewidth=3, alpha=0.9, label=f'Track {track_id} (Kalman Updates)',
-                    marker='o', markersize=5, markerfacecolor='white',
-                    markeredgewidth=2, zorder=3)
+            ax.scatter(update_times, update_ranges,
+                      color=VizConfig.TRACKS['color'],
+                      marker=VizConfig.TRACKS['marker'],
+                      s=VizConfig.TEMPORAL['update_marker_size'],
+                      facecolors=VizConfig.TRACKS['facecolors'],
+                      edgecolors=VizConfig.TRACKS['edgecolors'],
+                      linewidth=VizConfig.TRACKS['linewidth'] * 2,  # Thicker edges for visibility
+                      alpha=VizConfig.TRACKS['alpha'],
+                      label=f'Track {track_id} (Kalman Updates)',
+                      zorder=3)
 
-        # Plot prediction states (dashed line with triangles)
+        # Plot prediction states (markers only - orange circles)
         if prediction_times and prediction_ranges:
-            ax.plot(prediction_times, prediction_ranges, color=colors[i % len(colors)],
-                    linewidth=2, alpha=0.6, linestyle='--',
-                    label=f'Track {track_id} (Kalman Predictions)',
-                    marker='^', markersize=4, zorder=2)
+            ax.scatter(prediction_times, prediction_ranges,
+                      color=VizConfig.PREDICTIONS['color'],
+                      marker=VizConfig.PREDICTIONS['marker'],
+                      s=VizConfig.TEMPORAL['prediction_marker_size'],
+                      facecolor=VizConfig.PREDICTIONS['facecolor'],
+                      edgecolor=VizConfig.PREDICTIONS['edgecolor'],
+                      linewidth=VizConfig.PREDICTIONS['linewidth'],
+                      alpha=VizConfig.PREDICTIONS['alpha'],
+                      label=f'Track {track_id} (Kalman Predictions)',
+                      zorder=2)
 
-        # Plot raw detections (scatter)
+        # Plot raw detections (blue circles)
         if detection_times and detection_ranges:
             ax.scatter(detection_times, detection_ranges,
-                       color=colors[i % len(colors)], alpha=0.7, s=30,
-                       marker='s', edgecolors='black', linewidth=0.5,
-                       label=f'Track {track_id} (Raw Detections)', zorder=4)
+                       color=VizConfig.DETECTIONS['color'],
+                       alpha=VizConfig.DETECTIONS['alpha_base'],
+                       s=VizConfig.TEMPORAL['detection_scatter_size'],
+                       marker=VizConfig.DETECTIONS['marker'],
+                       edgecolors=VizConfig.DETECTIONS['edgecolor'],
+                       linewidth=VizConfig.DETECTIONS['linewidth'],
+                       label=f'Track {track_id} (Raw Detections)',
+                       zorder=4)
 
         # Mark significant time gaps
         for j in range(len(timestamps) - 1):
@@ -1205,23 +1237,23 @@ def visualize_tracking_temporal_evolution(
         if timestamps.any():
             ax.set_xlim(min(timestamps) - 0.5, max(timestamps) + 0.5)
 
-        # Add uncertainty analysis if available
-        if hasattr(track_history[0][1], 'state_history'):
-            uncertainties = []
-            uncertainty_times = []
-            for timestamp, track, _ in track_history:
-                if hasattr(track, 'covariance'):
-                    pos_uncertainty = np.sqrt(track.covariance[0, 0] + track.covariance[1, 1])
-                    uncertainties.append(pos_uncertainty)
-                    uncertainty_times.append(timestamp)
-
-            if uncertainties:
-                # Add uncertainty as shaded area
-                ax2 = ax.twinx()
-                ax2.plot(uncertainty_times, uncertainties, 'gray', alpha=0.5,
-                         linewidth=1, label='Position Uncertainty')
-                ax2.set_ylabel('Uncertainty (m)', fontsize=10, color='gray')
-                ax2.tick_params(axis='y', labelcolor='gray')
+        # # Add uncertainty analysis if available
+        # if hasattr(track_history[0][1], 'state_history'):
+        #     uncertainties = []
+        #     uncertainty_times = []
+        #     for timestamp, track, _ in track_history:
+        #         if hasattr(track, 'covariance'):
+        #             pos_uncertainty = np.sqrt(track.covariance[0, 0] + track.covariance[1, 1])
+        #             uncertainties.append(pos_uncertainty)
+        #             uncertainty_times.append(timestamp)
+        #
+        #     if uncertainties:
+        #         # Add uncertainty as shaded area
+        #         ax2 = ax.twinx()
+        #         ax2.plot(uncertainty_times, uncertainties, 'gray', alpha=0.5,
+        #                  linewidth=1, label='Position Uncertainty')
+        #         ax2.set_ylabel('Uncertainty (m)', fontsize=10, color='gray')
+        #         ax2.tick_params(axis='y', labelcolor='gray')
 
         # Add track statistics
         num_updates = len(update_times)
@@ -1232,7 +1264,7 @@ def visualize_tracking_temporal_evolution(
                       f'Predictions: {num_predictions}\n'
                       f'Duration: {track_duration:.1f}s')
 
-        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+        ax.text(0.02, 0.02, stats_text, transform=ax.transAxes,
                 bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8),
                 fontsize=9, verticalalignment='top')
 
