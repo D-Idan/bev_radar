@@ -428,6 +428,7 @@ def offline_tracking(
     # e) Temporal evolution visualization
     visualize_tracking_temporal_evolution(
         all_tracks=all_tracks,
+        all_ground_truth=all_ground_truth,
         all_frames=all_frames,
         frame_times=frame_times,
         output_dir=str(output_paths['summary_plots'])

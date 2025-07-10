@@ -1110,6 +1110,7 @@ def visualize_all_frames_3d_overview(
 
 def visualize_tracking_temporal_evolution(
         all_tracks: List[List[Track]],
+        all_ground_truth: List[List[Detection]],
         all_frames: List[int],
         frame_times: List[Tuple[int, float]],
         num_tracks: Optional[int] = 2,
@@ -1153,17 +1154,46 @@ def visualize_tracking_temporal_evolution(
         # Extract update states and detections
         update_data = []
         detection_data = []
+        ground_truth_data = []
         timestamps = []
 
         for timestamp, track, frame_id in track_history:
             # Update state (current position after measurement)
-            range_m, _ = track.kalman_polar_position
+            range_m, azimuth_rad = track.kalman_polar_position
             timestamps.append(timestamp)
             update_data.append((timestamp, range_m))
 
             # Detection data if available
             if track.last_detection:
                 detection_data.append((timestamp, track.last_detection.range_m))
+
+            # Ground truth data for this frame - filtered by Euclidean distance
+            frame_idx = all_frames.index(frame_id) if frame_id in all_frames else None
+            if frame_idx is not None and frame_idx < len(all_ground_truth):
+                from radar_tracking.coordinate_transforms import polar_to_cartesian
+
+                # Convert track position to Cartesian
+                track_x, track_y = polar_to_cartesian(range_m, azimuth_rad)
+
+                closest_gt = None
+                min_distance = float('inf')
+                distance_threshold = VizConfig.ASSOCIATION_DISTANCE['general_threshold']
+
+                for gt in all_ground_truth[frame_idx]:
+                    # Convert ground truth to Cartesian
+                    gt_x, gt_y = polar_to_cartesian(gt.range_m, gt.azimuth_rad)
+
+                    # Calculate Euclidean distance
+                    euclidean_distance = np.sqrt((track_x - gt_x) ** 2 + (track_y - gt_y) ** 2)
+
+                    # Keep track of closest ground truth within threshold
+                    if euclidean_distance <= distance_threshold and euclidean_distance < min_distance:
+                        min_distance = euclidean_distance
+                        closest_gt = gt
+
+                # Only add the closest ground truth if one was found
+                if closest_gt is not None:
+                    ground_truth_data.append((timestamp, closest_gt.range_m))
 
         # Sort all data by timestamp
         update_data.sort(key=lambda x: x[0])
@@ -1212,8 +1242,21 @@ def visualize_tracking_temporal_evolution(
                        marker=VizConfig.DETECTIONS['marker'],
                        edgecolors=VizConfig.DETECTIONS['edgecolor'],
                        linewidth=VizConfig.DETECTIONS['linewidth'],
-                       label=f'Network Detections',
+                       label=f'Network Detection',
                        zorder=4)
+
+        # Plot ground truth (green X markers)
+        if ground_truth_data:
+            gt_times = [item[0] for item in ground_truth_data]
+            gt_ranges = [item[1] for item in ground_truth_data]
+            ax.scatter(gt_times, gt_ranges,
+                       color=VizConfig.GROUND_TRUTH['color'],
+                       marker=VizConfig.GROUND_TRUTH['marker'],
+                       s=VizConfig.GROUND_TRUTH['size'],
+                       alpha=VizConfig.GROUND_TRUTH['alpha'],
+                       linewidth=VizConfig.GROUND_TRUTH['linewidth'],
+                       label='Label',
+                       zorder=1)
 
         # Mark significant time gaps
         for j in range(len(timestamps) - 1):
@@ -1231,7 +1274,6 @@ def visualize_tracking_temporal_evolution(
         ax.set_ylabel('Range (m)', fontsize=12)
         ax.set_title(f'Track {track_id}: Stored Kalman States Analysis',
                      fontsize=13, fontweight='bold')
-        ax.legend(loc='upper right', fontsize=10)
         ax.grid(True, alpha=0.3)
 
         # Set appropriate axis limits
@@ -1259,10 +1301,12 @@ def visualize_tracking_temporal_evolution(
         # Add track statistics
         num_updates = len(update_times)
         num_predictions = len(prediction_times)
+        num_ground_truth = len(ground_truth_data)
         track_duration = timestamps[-1] - timestamps[0] if len(timestamps) > 1 else 0
 
         stats_text = (f'Updates: {num_updates}\n'
                       f'Predictions: {num_predictions}\n'
+                      f'Ground Truth: {num_ground_truth}\n'
                       f'Duration: {track_duration:.1f}s')
 
         ax.text(0.02, 0.02, stats_text, transform=ax.transAxes,
@@ -1278,6 +1322,8 @@ def visualize_tracking_temporal_evolution(
                  'Actual prediction and update states from tracking system',
                  fontsize=14, fontweight='bold', y=0.93)
 
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='upper right', bbox_to_anchor=(0.98, 0.95), fontsize=10)
     plt.tight_layout()
     plt.subplots_adjust(top=0.78)
 

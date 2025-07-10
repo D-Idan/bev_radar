@@ -268,3 +268,13 @@ class VisualizationConfig:
         'azimuth': 2.0,  # degrees
         'range': 5.0  # meters
     }
+
+    # ===================
+    # ASSOCIATION DISTANCE THRESHOLDS
+    # ===================
+
+    ASSOCIATION_DISTANCE = {
+        'general_threshold': 2.0,  # meters - for general association
+        'azimuth_threshold': 5.0,  # degrees - for polar distance filtering
+        'range_threshold': 1.0,  # meters - for polar distance filtering
+    }
