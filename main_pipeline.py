@@ -259,6 +259,7 @@ class RadarProcessingPipeline:
 
             # Evaluation parameters
             'max_distance_threshold': self.config['tracking']['evaluation']['max_distance_threshold'],
+            'use_camera_fov_filter': self.config['tracking']['evaluation']['use_camera_fov_filter'],
 
             # Poor performance analysis
             'poor_performance_analysis': {

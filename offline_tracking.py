@@ -10,6 +10,7 @@ from pathlib import Path
 import json
 
 from radar_tracking import TrackletManager, Detection, Track
+from visualizations.kalman_visual import visualize_kalman_filter_analysis_longest_track
 from visualizations.track_viz import (
     visualize_counts_vs_tracks_per_frame,
     visualize_frame_radar_azimuth,
@@ -434,6 +435,15 @@ def offline_tracking(
         output_dir=str(output_paths['summary_plots'])
     )
 
+    # f) Kalman filter analysis for longest track
+    visualize_kalman_filter_analysis_longest_track(
+        all_tracks=all_tracks,
+        all_ground_truth=all_ground_truth,
+        all_frames=all_frames,
+        frame_times=frame_times,
+        output_dir=str(output_paths['summary_plots'])
+    )
+
     # Visualize timing analysis
     visualize_timing_analysis(
         frame_times=frame_times,
@@ -482,6 +492,7 @@ def offline_tracking(
                         max_frames= max_frames,
                         skip_initial_frames=config['min_hits'],
                         max_frame_gap_time=config['max_frame_gap_time'],
+                        use_camera_fov_filter=config['use_camera_fov_filter'],
 
     )
 

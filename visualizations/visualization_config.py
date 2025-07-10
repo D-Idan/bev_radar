@@ -278,3 +278,48 @@ class VisualizationConfig:
         'azimuth_threshold': 5.0,  # degrees - for polar distance filtering
         'range_threshold': 1.0,  # meters - for polar distance filtering
     }
+
+    # ===================
+    # KALMAN FILTER VISUALIZATION
+    # ===================
+
+    KALMAN_FILTER = {
+        'true_state': {
+            'color': 'green',
+            'linewidth': 2,
+            'marker': 'x',
+            'markersize': 6,
+            'alpha': 0.9,
+            'label': 'True State'
+        },
+        'prior_estimate': {
+            'color': 'blue',
+            'linewidth': 1.5,
+            'linestyle': '--',
+            'marker': 'o',
+            'markersize': 4,
+            'alpha': 0.7,
+            'label': 'Prior Estimate'
+        },
+        'posterior_estimate': {
+            'color': 'red',
+            'linewidth': 2,
+            'linestyle': '-.',
+            'marker': '^',
+            'markersize': 4,
+            'alpha': 0.9,
+            'label': 'Posterior Estimate'
+        },
+        'uncertainty_bounds': {
+            'color': 'red',
+            'linewidth': 1,
+            'linestyle': '--',
+            'alpha': 0.6,
+            'fill_alpha': 0.2,
+            'label': '±σ'
+        },
+        'error_colors': {
+            'prior': 'blue',
+            'posterior': 'red'
+        }
+    }

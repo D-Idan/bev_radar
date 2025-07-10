@@ -109,6 +109,7 @@ class TrackingConfigurationManager:
                     # Apply to tracker_config
                     config['tracker_config'][key] = value
 
+
             # Update output directory to include config name
             config['output_dir'] = str(dataset_root / 'plots' / 'tracking_output' / config_name)
 

@@ -12,6 +12,7 @@ from scipy.spatial.distance import cdist
 import json
 
 from utils.metrics.camera_iou_metrics import CameraIoUCalculator
+from utils.radar_camera_relation import is_radar_point_in_camera_view
 
 
 @dataclass
@@ -58,10 +59,12 @@ class AggregatedMetrics:
 class TrackingDetectionEvaluator:
     """Comprehensive evaluation for both detection and tracking performance."""
 
-    def __init__(self, distance_threshold: float = 5.0, iou_threshold: float = 0.3):
+    def __init__(self, distance_threshold: float = 5.0, iou_threshold: float = 0.3,
+                 use_camera_fov_filter: bool = True):
         """Initialize evaluator with thresholds."""
         self.distance_threshold = distance_threshold
         self.iou_threshold = iou_threshold
+        self.use_camera_fov_filter = use_camera_fov_filter
         self.camera_iou_calculator = CameraIoUCalculator()
 
         # Storage for evaluation data
@@ -109,6 +112,18 @@ class TrackingDetectionEvaluator:
         if df.empty:
             return {'positions': np.zeros((0, 2)), 'confidences': np.zeros(0)}
 
+        # Filter by camera FOV if enabled
+        if self.use_camera_fov_filter and 'range_m' in df.columns and 'azimuth_deg' in df.columns:
+            # Filter to keep only detections visible in camera
+            visible_mask = df.apply(
+                lambda row: is_radar_point_in_camera_view(row['range_m'], row['azimuth_deg']),
+                axis=1
+            )
+            df = df[visible_mask].copy()
+
+            if df.empty:  # All detections were filtered out
+                return {'positions': np.zeros((0, 2)), 'confidences': np.zeros(0)}
+
         ranges = df['range_m'].values
         azimuths = np.deg2rad(df['azimuth_deg'].values)
         x = ranges * np.sin(azimuths)
@@ -138,6 +153,18 @@ class TrackingDetectionEvaluator:
         """Extract tracking data from dataframe."""
         if df.empty:
             return {'positions': np.zeros((0, 2)), 'confidences': np.zeros(0), 'track_ids': np.zeros(0)}
+
+        # Filter by camera FOV if enabled
+        if self.use_camera_fov_filter and 'range_m' in df.columns and 'azimuth_deg' in df.columns:
+            # Filter to keep only tracks visible in camera
+            visible_mask = df.apply(
+                lambda row: is_radar_point_in_camera_view(row['range_m'], row['azimuth_deg']),
+                axis=1
+            )
+            df = df[visible_mask].copy()
+
+            if df.empty:  # All tracks were filtered out
+                return {'positions': np.zeros((0, 2)), 'confidences': np.zeros(0), 'track_ids': np.zeros(0)}
 
         ranges = df['range_m'].values
         azimuths = np.deg2rad(df['azimuth_deg'].values)
@@ -528,7 +555,8 @@ def evaluate_tracking_sequence(predictions_csv: str, ground_truth_csv: str,
                                iou_threshold: float = 0.3,
                                max_frames: Optional[int] = None,
                                skip_initial_frames: int = 3,
-                               max_frame_gap_time: float = 5.0) -> Tuple[Path, Dict[str, Any]]:
+                               max_frame_gap_time: float = 5.0,
+                               use_camera_fov_filter: bool = True) -> Tuple[Path, Dict[str, Any]]:
     """Evaluate complete tracking sequence and save both JSON and text reports.
     
     Args:
@@ -541,10 +569,12 @@ def evaluate_tracking_sequence(predictions_csv: str, ground_truth_csv: str,
         max_frames: Maximum number of frames to evaluate
         skip_initial_frames: Number of initial frames to skip from metrics
         max_frame_gap_time: Maximum time gap (seconds) before tracks are cleared
+        use_camera_fov_filter: Filter detections/tracks to camera FOV during evaluation
     """
     evaluator = TrackingDetectionEvaluator(
         distance_threshold=distance_threshold,
-        iou_threshold=iou_threshold
+        iou_threshold=iou_threshold,
+        use_camera_fov_filter=use_camera_fov_filter,
     )
 
     # Load data
