@@ -11,7 +11,23 @@ import imageio
 from tqdm import tqdm
 from rpl import RadarSignalProcessing
 from DBReader.DBReader import SyncReader
+from DBReader.DBReader.SensorsReaders import CANDecoder
+from radar_tracking.data_structures import EgoMotion
+from utils.odometry.odometry import get_custom_odometry, get_optimized_odometry
 
+
+def labels_need_update(labels_path, expected_columns):
+    """Check if labels.csv exists and has all expected columns"""
+    if not os.path.exists(labels_path):
+        return True
+
+    try:
+        existing_labels = pd.read_csv(labels_path)
+        missing_columns = set(expected_columns) - set(existing_labels.columns)
+        return len(missing_columns) > 0
+    except Exception as e:
+        print(f"Error reading existing labels: {e}")
+        return True
 
 def ensure_dirs(base_dir, subdirs):
     for sub in subdirs:
@@ -45,6 +61,13 @@ def extract_all(config):
     record = config['target_value']
     root_folder = Path(config['Data_Dir'], record)
 
+    expected_label_columns = [
+        'filename', 'timestamp_us', 'ego_steering_wheel_deg',
+        'ego_yaw_rate_deg_s', 'ego_speed_kph'
+        # Add other expected columns from original labels
+    ]
+    labels_update_needed = labels_need_update(config['label_path'], expected_label_columns)
+
     # Prepare output folder structure
     base = os.path.join(output_dir, record)
     subdirs = [
@@ -59,6 +82,11 @@ def extract_all(config):
     RSP_RD = RadarSignalProcessing(cal_table, method='RD', lib='PyTorch')
     RSP_RA = RadarSignalProcessing(cal_table, method='RA', lib='PyTorch')
     RSP_ADC = RadarSignalProcessing(cal_table, method='ADC', lib='PyTorch')
+
+    # Initialize CAN decoder for odometry, Use the DBC file from DBReader examples
+    can_dbc_path = Path(__file__).parent / 'DBReader' / 'examples' / 'can_database.dbc'
+    assert can_dbc_path.exists(), f"CAN database not found at {can_dbc_path}"
+    can_decoder = CANDecoder(str(can_dbc_path))
 
     # Filter labels for this record
     rec_labels = labels_df[labels_df['dataset'] == record]
@@ -75,22 +103,47 @@ def extract_all(config):
         rd_path = os.path.join(base, 'radar_RD', f'rd_{tag}.npy')
         ra_path = os.path.join(base, 'radar_RA', f'ra_{tag}.npy')
 
-        # Check if all files already exist - if so, skip processing but still collect labels
+        # Check if all files already exist
         files_exist = all(os.path.exists(path) for path in [adc_path, img_path, rd_path, ra_path])
 
         if files_exist:
-            # Still need to collect labels for this sample
-            timestamp = sample['radar_ch1']['timestamp']  # Get timestamp for labels
+            # Extract timestamp (using radar as reference)
+            timestamp = sample['radar_ch1']['timestamp']
+
+            # Collect labels for this sample
             boxes = rec_labels[rec_labels['index'] == idx]
             boxes_out = boxes.copy()
             boxes_out['filename'] = tag
             boxes_out['timestamp_us'] = timestamp
+
+            if labels_update_needed:
+                # Only extract odometry if labels need updating
+                odometry_data = None
+                if can_decoder is not None:
+                    try:
+                        odometry = get_optimized_odometry(db, can_decoder, timestamp)
+                        odometry_data = {
+                            'steering_wheel_angle_deg': odometry[0],
+                            'yaw_rate_deg_per_sec': odometry[1],
+                            'speed_kph': odometry[2]
+                        }
+                    except Exception as e:
+                        print(f"Warning: Failed to extract odometry for sample {tag}: {e}")
+
+                # Add odometry data (or NaN if extraction failed)
+                if odometry_data is not None:
+                    boxes_out['ego_steering_wheel_deg'] = odometry_data['steering_wheel_angle_deg']
+                    boxes_out['ego_yaw_rate_deg_s'] = odometry_data['yaw_rate_deg_per_sec']
+                    boxes_out['ego_speed_kph'] = odometry_data['speed_kph']
+                else:
+                    boxes_out['ego_steering_wheel_deg'] = np.nan
+                    boxes_out['ego_yaw_rate_deg_s'] = np.nan
+                    boxes_out['ego_speed_kph'] = np.nan
+            # If labels don't need updating, don't add odometry columns at all
+            # (or you could read existing values from the current labels.csv)
+
             collected.append(boxes_out)
             continue  # Skip to next iteration
-
-        # Extract timestamp (using radar as reference, but you can use any sensor)
-        # The timestamp is in microseconds
-        timestamp = sample['radar_ch1']['timestamp']
 
         # 1. ADC_Data
         if not os.path.exists(adc_path):
@@ -129,11 +182,38 @@ def extract_all(config):
                 print(f"Skipping sample {tag} due to save error")
                 continue
 
+        # 5. Extract odometry data
+        odometry_data = None
+        if can_decoder is not None:
+            try:
+                odometry = get_optimized_odometry(db, can_decoder, timestamp)
+                odometry_data = {
+                    'steering_wheel_angle_deg': odometry[0],  # Steering wheel angle (degrees)
+                    'yaw_rate_deg_per_sec': odometry[1],      # Yaw rate (degrees/sec)
+                    'speed_kph': odometry[2]                   # Speed (kph)
+                }
+            except Exception as e:
+                print(f"Warning: Failed to extract odometry for sample {tag}: {e}")
+                odometry_data = None
+
+
         # collect label entries with timestamp
         boxes = rec_labels[rec_labels['index'] == idx]
         boxes_out = boxes.copy()
         boxes_out['filename'] = tag
         boxes_out['timestamp_us'] = timestamp  # Add timestamp in microseconds
+
+        # Add odometry data to labels
+        if odometry_data is not None:
+            boxes_out['ego_steering_wheel_deg'] = odometry_data['steering_wheel_angle_deg']
+            boxes_out['ego_yaw_rate_deg_s'] = odometry_data['yaw_rate_deg_per_sec']
+            boxes_out['ego_speed_kph'] = odometry_data['speed_kph']
+        else:
+            # Add NaN values if odometry is not available
+            boxes_out['ego_steering_wheel_deg'] = np.nan
+            boxes_out['ego_yaw_rate_deg_s'] = np.nan
+            boxes_out['ego_speed_kph'] = np.nan
+
         collected.append(boxes_out)
 
     # write aggregated labels.csv
