@@ -129,25 +129,28 @@ class SyncReader():
         nb_tolerance = 0
 
         # for Each radar sample, find the clostest sample for each sensor
-        if(master is None):
+        if(master is None or master=='radar'):
             # by default, we use the Radar as Matser sensor
             if('radar_ch0' not in self.dicts or 'radar_ch1' not in self.dicts
                or 'radar_ch2' not in self.dicts or 'radar_ch3' not in self.dicts):
                 print('Error: recording does not contains the 4 radar chips')
 
-            keys =list(self.dicts.keys())
+            keys = ['camera']  # Only include camera
             self.keys = keys
 
-            if('gps' in self.dicts):
-                keys.remove('gps')
-            if('preview' in self.dicts):
-                keys.remove('preview')
-            if('None' in self.dicts):
-                keys.remove('None')
-            keys.remove('radar_ch0')
-            keys.remove('radar_ch1')
-            keys.remove('radar_ch2')
-            keys.remove('radar_ch3')
+            # keys =list(self.dicts.keys())
+            # self.keys = keys
+            #
+            # if('gps' in self.dicts):
+            #     keys.remove('gps')
+            # if('preview' in self.dicts):
+            #     keys.remove('preview')
+            # if('None' in self.dicts):
+            #     keys.remove('None')
+            # keys.remove('radar_ch0')
+            # keys.remove('radar_ch1')
+            # keys.remove('radar_ch2')
+            # keys.remove('radar_ch3')
 
             self.table=[]
 
