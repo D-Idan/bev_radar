@@ -6,7 +6,7 @@ from ultralytics import YOLO
 import numpy as np
 from typing import Dict, List, Tuple
 import cv2
-
+from pathlib import Path
 
 class CarTracker:
     def __init__(self, model_name: str, tracker_config: str, confidence: float = 0.5):
@@ -18,6 +18,8 @@ class CarTracker:
             tracker_config: Tracker configuration file
             confidence: Detection confidence threshold
         """
+        model_name_path = Path(__file__).parent / model_name
+        model_name = model_name_path if model_name_path.exists() else model_name
         self.model = YOLO(model_name)
         self.tracker_config = tracker_config
         self.confidence = confidence

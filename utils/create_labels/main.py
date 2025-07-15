@@ -6,10 +6,10 @@ from typing import List, Dict
 import pandas as pd
 from tqdm import tqdm
 
-from config import *
-from detector import CarDetector
-from labels_tracker import CarTracker
-from labels_utils import (
+from utils.create_labels.config import *
+from utils.create_labels.detector import CarDetector
+from utils.create_labels.labels_tracker import CarTracker
+from utils.create_labels.labels_utils import (
     extract_sample_number,
     get_sorted_images,
     draw_bounding_boxes,

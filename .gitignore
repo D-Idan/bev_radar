@@ -70,3 +70,6 @@ external/*
 
 *.pdf
 config/pipeline_config.yaml
+
+# Models
+*.pt

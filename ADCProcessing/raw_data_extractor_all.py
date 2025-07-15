@@ -12,10 +12,15 @@ from tqdm import tqdm
 from rpl import RadarSignalProcessing
 from DBReader.DBReader import SyncReader
 
+from utils.create_labels.main import process_images_with_tracking, process_images_without_tracking
+
 def create_labels_file(base_dir, frame_data):
     """Create labels.csv file with timestamp, index, and filename info"""
     labels_df = pd.DataFrame(frame_data)
     labels_df = labels_df.sort_values('timestamp_us')
+    # Extract dataset name from base_dir path
+    dataset_name = Path(base_dir).name
+    labels_df['dataset'] = dataset_name
     labels_df.to_csv(os.path.join(base_dir, 'labels.csv'), index=False)
 
 def ensure_dirs(base_dir, subdirs):
@@ -42,6 +47,63 @@ def safe_save_with_retry(save_func, filepath, data, max_retries=3, delay=1):
                 return False
     return False
 
+
+def merge_labels(base_dir, car_labels_df):
+    """Merge car detection results with existing labels.csv"""
+
+    # Load existing labels
+    existing_labels_path = os.path.join(base_dir, 'labels.csv')
+    existing_df = pd.read_csv(existing_labels_path)
+
+    # Extract sample numbers from car labels filenames
+    car_labels_df['sample_index'] = car_labels_df['filename'].str.extract(r'image_(\d+)\.jpg').astype(int)
+
+    # Merge dataframes
+    merged_df = existing_df.merge(
+        car_labels_df[['sample_index', 'x1_pix', 'y1_pix', 'x2_pix', 'y2_pix', 'ID']],
+        left_on='index',
+        right_on='sample_index',
+        how='left'
+    )
+
+    # Drop the temporary sample_index column
+    merged_df = merged_df.drop('sample_index', axis=1)
+
+    # Add the missing columns with placeholder values
+    merged_df['laser_X_m'] = 0.0
+    merged_df['laser_Y_m'] = 0.0
+    merged_df['radar_X_m'] = 0.0
+    merged_df['radar_Y_m'] = 0.0
+    merged_df['radar_R_m'] = 0.0
+    merged_df['radar_A_deg'] = 0.0
+    merged_df['radar_D_mps'] = 0.0
+    merged_df['radar_P_db'] = 0.0
+    merged_df['dataset'] = Path(base_dir).name
+    merged_df['Annotation'] = 'weak'  # default annotation
+    merged_df['Difficult'] = 0  # default difficulty
+
+    # Reorder columns to match the expected format
+    column_order = [
+        'numSample', 'x1_pix', 'y1_pix', 'x2_pix', 'y2_pix',
+        'laser_X_m', 'laser_Y_m', 'radar_X_m', 'radar_Y_m', 'radar_R_m',
+        'radar_A_deg', 'radar_D_mps', 'radar_P_db', 'dataset', 'index',
+        'Annotation', 'Difficult', 'filename', 'timestamp_us'
+    ]
+
+    # Add numSample column (same as index)
+    merged_df['numSample'] = merged_df['index']
+
+    # Ensure all columns exist
+    for col in column_order:
+        if col not in merged_df.columns:
+            merged_df[col] = None
+
+    # Reorder columns
+    merged_df = merged_df[column_order]
+
+    # Save merged labels
+    merged_df.to_csv(existing_labels_path, index=False)
+    print(f"Updated labels.csv with car detection data")
 def extract_all(config):
     # Load configuration
     cal_table = config['Calibration']
@@ -65,8 +127,9 @@ def extract_all(config):
 
     # Process all frames
     frame_data = []
-
-    for idx in tqdm(range(len(db)), desc="Processing Samples", unit="sample", colour="magenta"):
+    DEBUG = True
+    db_len = 50 if DEBUG else len(db)
+    for idx in tqdm(range(db_len), desc="Processing Samples", unit="sample", colour="magenta"):
         sample = db.GetSensorData(idx)
         tag = f"{idx:06d}"
 
@@ -76,11 +139,6 @@ def extract_all(config):
         rd_path = os.path.join(base, 'radar_RD', f'rd_{tag}.npy')
         ra_path = os.path.join(base, 'radar_RA', f'ra_{tag}.npy')
 
-        # Check if all files already exist - if so, skip processing
-        files_exist = all(os.path.exists(path) for path in [adc_path, img_path, rd_path, ra_path])
-        if files_exist:
-            continue
-
         # Extract timestamp
         timestamp = sample['radar_ch1']['timestamp']
         # Collect frame metadata - Add these lines
@@ -89,6 +147,11 @@ def extract_all(config):
             'index': idx,
             'filename': tag
         })
+
+        # Check if all files already exist - if so, skip processing
+        files_exist = all(os.path.exists(path) for path in [adc_path, img_path, rd_path, ra_path])
+        if files_exist:
+            continue
 
         # 1. ADC_Data
         if not os.path.exists(adc_path):
@@ -129,6 +192,28 @@ def extract_all(config):
 
     create_labels_file(base, frame_data)
     print(f"Processed {len(db)} frames")
+
+    print("\nStarting car detection and labeling...")
+    try:
+        # Path to the camera images folder
+        camera_folder = os.path.join(base, 'camera')
+        output_csv = os.path.join(base, 'car_labels.csv')
+
+        # Run car detection with tracking
+        car_labels_df = process_images_with_tracking(
+            input_folder=camera_folder,
+            output_csv=output_csv,
+            save_viz=False  # This will create visualizations
+        )
+
+        # Merge with existing labels.csv
+        merge_labels(base, car_labels_df)
+
+        print(f"Car detection complete! Found {car_labels_df['ID'].notna().sum()} detections")
+
+    except Exception as e:
+        print(f"Error during car detection: {e}")
+        print("Continuing without car labels...")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Extract and organize RadIal data')

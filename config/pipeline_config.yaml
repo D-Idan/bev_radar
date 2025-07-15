@@ -10,7 +10,7 @@ tracking:
   # Processing options
   create_video: true # Create video output
   max_video_samples: null  # null = no limit, integer = limit samples
-  max_frames: null  # null = all frames, integer = limit for debugging
+  max_frames: 40  # null = all frames, integer = limit for debugging
 
   # Poor performance analysis
   poor_performance_analysis:
