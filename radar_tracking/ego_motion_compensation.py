@@ -1,122 +1,65 @@
-import numpy as np
-from typing import List, Tuple, Optional
-from radar_tracking.data_structures import Detection, Track, EgoMotion
+# radar_tracking/ego_motion_compensation.py
 
+import numpy as np
+from typing import Tuple, Optional
+from radar_tracking.data_structures import OdometryData
 
 class EgoMotionCompensator:
-    """
-    Compensates for ego vehicle motion in radar detections and tracks.
-    """
+    """Ego motion compensation for predicted track states."""
 
-    def __init__(self, radar_mounting_angle: float = 0.0):
-        """
-        Initialize ego motion compensator.
+    def __init__(self, radar_offset_x=0.0, radar_offset_y=3.5):
+        self.radar_offset = np.array([radar_offset_x, radar_offset_y])
 
-        Args:
-            radar_mounting_angle: Radar mounting angle relative to vehicle (radians)
-        """
-        self.radar_mounting_angle = radar_mounting_angle
+    def integrate_ego_motion(self, odometry: OdometryData, dt: float) -> Tuple[float, float, float, float]:
+        if dt <= 0:
+            return 0.0, 0.0, 0.0, 0.0
 
-    def compensate_detection(self, detection: Detection, ego_motion: EgoMotion,
-                             dt: float) -> Detection:
-        """
-        Compensate a single detection for ego motion.
+        v = odometry.speed_mps
+        omega = odometry.yaw_rate_rad_s
 
-        Args:
-            detection: Original detection
-            ego_motion: Ego vehicle motion data
-            dt: Time elapsed since detection
+        delta_psi = omega * dt
 
-        Returns:
-            Motion-compensated detection
-        """
-        # Get original position
-        x, y = detection.cartesian_pos
+        if abs(omega) < 1e-6:  # Straight motion
+            delta_x = 0.0
+            delta_y = v * dt
+        else:
+            radius = v / omega
+            delta_x = radius * (1 - np.cos(delta_psi))
+            delta_y = radius * np.sin(delta_psi)
 
-        # Calculate ego motion displacement
-        # For small time intervals, we can use simple motion model
-        ego_dx = ego_motion.speed_mps * dt * np.sin(ego_motion.yaw_rate_rps * dt)
-        ego_dy = ego_motion.speed_mps * dt * np.cos(ego_motion.yaw_rate_rps * dt)
-        ego_dtheta = ego_motion.yaw_rate_rps * dt
+        return delta_x, delta_y, delta_psi, v
 
-        # Rotate and translate to compensate for ego motion
-        cos_theta = np.cos(ego_dtheta)
-        sin_theta = np.sin(ego_dtheta)
+    def compensate_track_state(self, state: np.ndarray,
+                               odometry: OdometryData,
+                               dt: float) -> np.ndarray:
+        if dt <= 0:
+            return state
 
-        # Apply rotation
-        x_rot = x * cos_theta - y * sin_theta
-        y_rot = x * sin_theta + y * cos_theta
+        # Ego motion calculation
+        delta_x_ego, delta_y_ego, delta_psi, vel_radar = self.integrate_ego_motion(odometry, dt)
+        delta_translation = np.array([delta_x_ego, delta_y_ego])
 
-        # Apply translation
-        x_comp = x_rot - ego_dx
-        y_comp = y_rot - ego_dy
+        # Rotation matrix for coordinate transformation
+        cos_psi = np.cos(delta_psi)
+        sin_psi = np.sin(delta_psi)
+        R = np.array([
+            [cos_psi, sin_psi],
+            [-sin_psi, cos_psi]
+        ])
 
-        # Create compensated detection
-        comp_detection = Detection(
-            range_m=detection.range_m,
-            azimuth_rad=detection.azimuth_rad,
-            confidence=detection.confidence,
-            timestamp=detection.timestamp,
-            frame_id=detection.frame_id,
-            cartesian_pos=(x_comp, y_comp),
-            ego_speed_mps=ego_motion.speed_mps,
-            ego_yaw_rate_rps=ego_motion.yaw_rate_rps,
-            ego_steering_rad=ego_motion.steering_rad
-        )
+        # Position compensation
+        pos_obj = np.array([state[0], state[1]])
+        pos_vehicle = pos_obj + self.radar_offset
+        pos_vehicle_comp = R @ (pos_vehicle - delta_translation)
+        pos_radar_comp = pos_vehicle_comp - self.radar_offset
 
-        # Update polar coordinates to match compensated position
-        from radar_tracking.coordinate_transforms import cartesian_to_polar
-        comp_detection.range_m, comp_detection.azimuth_rad = cartesian_to_polar(x_comp, y_comp)
+        compensated_state = state.copy()
+        compensated_state[0:2] = pos_radar_comp
 
-        return comp_detection
+        # Velocity compensation: rotate relative velocities to new radar frame
+        if len(state) > 2:
+            vel_relative = np.array([state[2], state[3]])
+            vel_relative_rotated = R @ vel_relative
+            compensated_state[2:4] = vel_relative_rotated
 
-    def compensate_detections(self, detections: List[Detection],
-                              ego_motion: EgoMotion, dt: float) -> List[Detection]:
-        """Compensate multiple detections for ego motion."""
-        return [self.compensate_detection(det, ego_motion, dt) for det in detections]
-
-    def predict_with_ego_motion(self, state: np.ndarray, ego_motion: EgoMotion,
-                                dt: float) -> np.ndarray:
-        """
-        Predict state with ego motion compensation.
-
-        Args:
-            state: Current state [x, y, vx, vy]
-            ego_motion: Ego vehicle motion
-            dt: Time step
-
-        Returns:
-            Predicted state accounting for ego motion
-        """
-        # Copy state
-        pred_state = state.copy()
-
-        # Calculate ego motion effects
-        v_ego = ego_motion.speed_mps
-        omega = ego_motion.yaw_rate_rps
-
-        # For a turning vehicle, the apparent velocity of static objects is:
-        # v_apparent = -v_ego * [sin(theta), cos(theta)] - omega * [-y, x]
-
-        # Position prediction with ego compensation
-        pred_state[0] = state[0] + state[2] * dt  # x position
-        pred_state[1] = state[1] + state[3] * dt  # y position
-
-        # Adjust for ego motion (simplified for small dt)
-        pred_state[0] -= v_ego * np.sin(omega * dt) * dt
-        pred_state[1] -= v_ego * (1 - np.cos(omega * dt))
-
-        # Rotate due to ego yaw
-        cos_omega = np.cos(omega * dt)
-        sin_omega = np.sin(omega * dt)
-
-        x_rot = pred_state[0] * cos_omega - pred_state[1] * sin_omega
-        y_rot = pred_state[0] * sin_omega + pred_state[1] * cos_omega
-
-        pred_state[0] = x_rot
-        pred_state[1] = y_rot
-
-        # Velocity stays the same in world frame
-        # (assuming tracked objects maintain their velocity)
-
-        return pred_state
+        return compensated_state

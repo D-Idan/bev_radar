@@ -7,7 +7,7 @@ Handles track lifecycle, merging, and long-term tracking statistics.
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 import numpy as np
-from radar_tracking.data_structures import Track, Detection, TrackingResult
+from radar_tracking.data_structures import Track, Detection, TrackingResult, OdometryData
 from radar_tracking.tracker import RadarTracker
 from radar_tracking.metrics import RadarMetrics
 
@@ -86,7 +86,9 @@ class TrackletManager:
                detections: List[Detection],
                ground_truth: Optional[List[Detection]] = None,
                dt: Optional[float] = None,
-               current_time: Optional[float] = None) -> List[Track]:
+               current_time: Optional[float] = None,
+               odometry: Optional[OdometryData] = None,
+               ) -> List[Track]:
         """
         Update tracking with new detections.
 
@@ -95,6 +97,7 @@ class TrackletManager:
             ground_truth: Optional ground truth for evaluation
             dt: Optional time step for this frame (if None, uses tracker default)
             current_time: Optional current timestamp in seconds
+            odometry: #TODO
 
         Returns:
             List of active tracks
@@ -104,10 +107,10 @@ class TrackletManager:
         # Update tracker with timestamp support
         if current_time is not None:
             # Pass current time to tracker
-            tracks = self.tracker.update(detections, dt, current_time)
+            tracks = self.tracker.update(detections, dt, current_time, odometry)
         else:
             # Fallback to dt-based update
-            tracks = self.tracker.update(detections, dt)
+            tracks = self.tracker.update(detections, dt, odometry=odometry)
 
         # Update tracklet statistics
         self._update_tracklet_statistics(tracks)

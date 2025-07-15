@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from radar_tracking.data_structures import EgoMotion
+from radar_tracking.data_structures import OdometryData
 
 
 def load_odometry_data(labels_df: pd.DataFrame) -> dict:
@@ -11,7 +11,7 @@ def load_odometry_data(labels_df: pd.DataFrame) -> dict:
         labels_df: Labels DataFrame containing odometry columns
 
     Returns:
-        Dictionary mapping sample_id (numSample) to EgoMotion objects
+        Dictionary mapping sample_id (numSample) to OdometryData objects
     """
     print("Loading odometry data from labels...")
 
@@ -45,8 +45,8 @@ def load_odometry_data(labels_df: pd.DataFrame) -> dict:
             # Create odometry tuple in expected format
             odometry_tuple = (float(steering_deg), float(yaw_rate_deg_s), float(speed_kph))
 
-            # Create EgoMotion object using existing from_odometry method
-            ego_motion = EgoMotion.from_odometry(odometry_tuple, timestamp_s)
+            # Create OdometryData object using existing from_odometry method
+            ego_motion = OdometryData.from_odometry(odometry_tuple, timestamp_s)
             odometry_dict[sample_id] = ego_motion
             successful_loads += 1
 

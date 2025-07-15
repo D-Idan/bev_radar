@@ -67,6 +67,13 @@ tracking:
     initial_pos_std: 2.0
     initial_vel_std: 5.0
 
+  # Ego motion compensation
+  ego_motion:
+    ego_motion_enable: false
+    radar_position:
+      lateral_offset: 0.0    # meters, positive = right side
+      longitudinal_offset: -3.0  # meters, positive = forward
+
   # Evaluation parameters
   evaluation:
     max_distance_threshold: 0.8  # Distance threshold for valid associations in evaluation (meters) default: 2.0

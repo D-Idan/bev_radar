@@ -257,6 +257,13 @@ class RadarProcessingPipeline:
                 'initial_vel_std': self.config['tracking']['kalman']['initial_vel_std'],
             },
 
+            # Ego motion
+            'ego_motion_config': {
+                'ego_motion_enable': self.config['tracking']['ego_motion']['ego_motion_enable'],
+                'lateral_offset': self.config['tracking']['ego_motion']['radar_position']['lateral_offset'],
+                'longitudinal_offset': self.config['tracking']['ego_motion']['radar_position']['longitudinal_offset'],
+            },
+
             # Evaluation parameters
             'max_distance_threshold': self.config['tracking']['evaluation']['max_distance_threshold'],
             'use_camera_fov_filter': self.config['tracking']['evaluation']['use_camera_fov_filter'],

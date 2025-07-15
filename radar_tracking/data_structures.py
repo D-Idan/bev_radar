@@ -148,3 +148,38 @@ class TrackingResult:
     num_ground_truth: int
     match_ratio: float
     average_distance: float
+
+
+@dataclass
+class OdometryData:
+    """Vehicle odometry data for ego motion compensation."""
+    speed_kph: float  # Vehicle speed in km/h
+    steering_deg: float  # Steering angle in degrees
+    yaw_rate_deg_s: float  # Yaw rate in degrees/second
+    timestamp: float  # Timestamp in seconds
+
+    @classmethod
+    def from_odometry(cls, odometry: tuple, timestamp: float):
+        """Create from odometry tuple (steering_deg, yaw_rate_deg, speed_kph)."""
+        steering_deg, yaw_rate_deg, speed_kph = odometry
+        return cls(
+            speed_kph=speed_kph,
+            yaw_rate_deg_s=yaw_rate_deg,
+            steering_deg=steering_deg,
+            timestamp=timestamp
+        )
+
+    @property
+    def speed_mps(self) -> float:
+        """Convert speed to m/s."""
+        return self.speed_kph / 3.6
+
+    @property
+    def steering_rad(self) -> float:
+        """Convert steering angle to radians."""
+        return np.radians(self.steering_deg)
+
+    @property
+    def yaw_rate_rad_s(self) -> float:
+        """Convert yaw rate to rad/s."""
+        return np.radians(self.yaw_rate_deg_s)

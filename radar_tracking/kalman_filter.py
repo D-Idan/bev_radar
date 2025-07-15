@@ -8,6 +8,8 @@ import numpy as np
 from typing import Tuple, List, Optional
 from copy import deepcopy
 
+from radar_tracking.data_structures import OdometryData
+
 
 class RadarKalmanFilter:
     """
@@ -17,7 +19,8 @@ class RadarKalmanFilter:
     Measurement vector: [x, y] (position only)
     """
 
-    def __init__(self, base_dt: float = 0.1, config: dict = None):
+    def __init__(self, base_dt: float = 0.1, config: dict = None,
+                 ego_motion_config: dict = None):
         """
         Initialize Kalman filter.
 
@@ -54,6 +57,17 @@ class RadarKalmanFilter:
             [1, 0, 0, 0],
             [0, 1, 0, 0]
         ])
+
+        # Initialize ego motion compensator if enabled
+        self.ego_motion_config = ego_motion_config
+        if ego_motion_config['ego_motion_enable']:
+            from radar_tracking.ego_motion_compensation import EgoMotionCompensator
+            self.ego_compensator = EgoMotionCompensator(
+                self.ego_motion_config['lateral_offset'],
+                self.ego_motion_config['longitudinal_offset']
+            )
+        else:
+            self.ego_compensator = None
 
     def _get_F_matrix(self, dt: float) -> np.ndarray:
         """Get state transition matrix for given time step."""
@@ -94,7 +108,9 @@ class RadarKalmanFilter:
         return state, covariance
 
     def predict(self, state: np.ndarray, covariance: np.ndarray,
-                dt: float) -> Tuple[np.ndarray, np.ndarray]:
+                dt: float,
+                odometry: Optional[OdometryData] = None,
+                ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Predict next state using motion model with specific time step.
 
@@ -102,15 +118,25 @@ class RadarKalmanFilter:
             state: Current state vector
             covariance: Current state covariance matrix
             dt: Time step for this prediction (seconds)
+            odometry: #TODO
 
         Returns:
             Tuple of (predicted_state, predicted_covariance)
         """
+        # Apply ego motion compensation to current state
+        if (self.ego_motion_config['ego_motion_enable'] and
+            odometry is not None and
+            self.ego_compensator is not None):
+            state_pred = self.ego_compensator.compensate_track_state(state, odometry, dt)
+        else:
+            state_pred = state
+
+        # Then apply Kalman prediction on the compensated state
         F = self._get_F_matrix(dt)
         Q = self._get_Q_matrix(dt)
 
         # Predict state: x_{k|k-1} = F * x_{k-1|k-1}
-        state_pred = F @ state
+        state_pred = F @ state_pred
 
         # Predict covariance: P_{k|k-1} = F * P_{k-1|k-1} * F^T + Q
         covariance_pred = F @ covariance @ F.T + Q
@@ -118,7 +144,9 @@ class RadarKalmanFilter:
         return state_pred, covariance_pred
 
     def multi_step_predict(self, state: np.ndarray, covariance: np.ndarray,
-                           total_dt: float, step_dt: float) -> List[Tuple[np.ndarray, np.ndarray]]:
+                           total_dt: float, step_dt: float,
+                           odometry: Optional[OdometryData] = None,
+                           ) -> List[Tuple[np.ndarray, np.ndarray]]:
         """
         Perform multiple prediction steps for large time gaps.
 
@@ -140,7 +168,7 @@ class RadarKalmanFilter:
         for i in range(num_steps):
             # Use remaining time for last step if needed
             dt = min(step_dt, total_dt - i * step_dt)
-            current_state, current_cov = self.predict(current_state, current_cov, dt)
+            current_state, current_cov = self.predict(current_state, current_cov, dt, odometry)
             predictions.append((deepcopy(current_state), deepcopy(current_cov)))
 
         return predictions

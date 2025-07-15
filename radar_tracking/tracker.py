@@ -4,7 +4,7 @@ Main tracking logic implementing SORT-like algorithm for radar objects.
 """
 import numpy as np
 from typing import List, Dict, Tuple, Optional
-from radar_tracking.data_structures import Detection, Track
+from radar_tracking.data_structures import Detection, Track, OdometryData
 from radar_tracking.kalman_filter import RadarKalmanFilter
 from radar_tracking.metrics import RadarMetrics
 from radar_tracking.coordinate_transforms import euclidean_distance, cartesian_to_polar
@@ -71,6 +71,13 @@ class RadarTracker:
             'initial_vel_std': 5.0,  # Initial velocity uncertainty
         },
 
+        # Ego motion compensation
+        'ego_motion_config': {
+            'ego_motion_enable': False,
+            'lateral_offset': 0.0,
+            'longitudinal_offset': 3.5,
+        },
+
         # Evaluation parameters
         'max_distance_threshold': 2.0,  # Distance threshold for valid associations
     }
@@ -118,6 +125,9 @@ class RadarTracker:
         # Kalman Filter parameters
         kalman_config = config['kalman_config']
 
+        # Store ego motion configuration
+        self.ego_motion_config = config['ego_motion_config']
+
         # Evaluation parameters
         self.max_distance_threshold = config['max_distance_threshold']
 
@@ -128,6 +138,7 @@ class RadarTracker:
         self.kf = RadarKalmanFilter(
             base_dt=self.base_dt,
             config=kalman_config,
+            ego_motion_config = self.ego_motion_config
         )
         self.metrics = RadarMetrics(max_distance_threshold=self.max_distance_threshold)
 
@@ -144,7 +155,8 @@ class RadarTracker:
         self.tracks_culled_by_range = 0
 
     def update(self, detections: List[Detection], dt: Optional[float] = None,
-               current_time: Optional[float] = None) -> List[Track]:
+               current_time: Optional[float] = None,
+               odometry: Optional[OdometryData] = None) -> List[Track]:
         """
         Update tracker with new detections and dynamic time step.
 
@@ -152,6 +164,7 @@ class RadarTracker:
             detections: List of detections for current frame
             dt: Optional time step for this frame (if None, uses configured dt)
             current_time: Optional current timestamp in seconds
+            odometry: #TODO
 
         Returns:
             List of active tracks
@@ -194,10 +207,10 @@ class RadarTracker:
         # Perform predictions based on actual time gap
         if current_time is not None:
             # Use timestamp-aware prediction for better handling of time gaps
-            self._predict_tracks_with_timestamp(current_time, frame_dt)
+            self._predict_tracks_with_timestamp(current_time, frame_dt, odometry)
         else:
             # Fall back to simple prediction when no timestamp available
-            self._predict_tracks(frame_dt)
+            self._predict_tracks(frame_dt, odometry)
 
         # Remove tracks that are predicted to be outside radar coverage
         if self.enable_range_culling:
@@ -301,7 +314,8 @@ class RadarTracker:
 
         self.tracks = tracks_to_keep
 
-    def _predict_tracks_with_timestamp(self, current_time: float, time_gap: float):
+    def _predict_tracks_with_timestamp(self, current_time: float, time_gap: float,
+                                       odometry: Optional[OdometryData] = None):
         """
         Predict tracks considering actual time gaps with multi-step prediction for large gaps.
         Remove those predicted outside radar coverage.
@@ -321,7 +335,8 @@ class RadarTracker:
             if track_time_gap > self.max_dt_gap:
                 # Multi-step prediction for large gaps
                 predictions = self.kf.multi_step_predict(
-                    track.state, track.covariance, track_time_gap, self.base_dt
+                    track.state, track.covariance, track_time_gap, self.base_dt,
+                    odometry=odometry,
                 )
 
                 # Record all intermediate prediction steps
@@ -337,10 +352,11 @@ class RadarTracker:
             else:
                 # Single-step prediction
                 pred_state, pred_cov = self.kf.predict(
-                    track.state, track.covariance, track_time_gap
+                    track.state, track.covariance, track_time_gap, odometry
                 )
                 # Record single prediction step
-                track.record_prediction_step(pred_state, pred_cov, current_time, track_time_gap)
+                track.record_prediction_step(pred_state, pred_cov, current_time,
+                                             track_time_gap)
 
             # Check if predicted position is within coverage (applies to both cases)
             if self._is_track_within_coverage_predicted(pred_state):
@@ -373,7 +389,7 @@ class RadarTracker:
         return (min_range_check <= range_m <= max_range_check and
                 min_azimuth_check <= azimuth_deg <= max_azimuth_check)
 
-    def _predict_tracks(self, dt: float):
+    def _predict_tracks(self, dt: float, odometry: Optional[OdometryData] = None):
         """
         Predict all existing tracks with specific time step (fallback method).
 
@@ -384,7 +400,7 @@ class RadarTracker:
             track.state, track.covariance = self.kf.predict(
                 track.state,
                 track.covariance,
-                dt
+                dt, odometry
             )
             track.age += 1
 

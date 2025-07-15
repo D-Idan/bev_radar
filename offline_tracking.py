@@ -10,6 +10,7 @@ from pathlib import Path
 import json
 
 from radar_tracking import TrackletManager, Detection, Track
+from radar_tracking.data_structures import OdometryData
 from visualizations.kalman_visual import visualize_kalman_filter_analysis_longest_track
 from visualizations.track_viz import (
     visualize_counts_vs_tracks_per_frame,
@@ -295,8 +296,23 @@ def offline_tracking(
         # b) Build ground truth for this frame
         ground_truth = build_ground_truth_for_frame(labels_df, frame_id)
 
-        # c) Update tracker
-        active_tracks = manager.update(detections, ground_truth, current_time=timestamp_s)
+        # Get odometry data for this frame from labels (if ego motion is enabled)
+        odometry_data = None
+        if config['ego_motion_config']['ego_motion_enable']:
+            labels_frame = labels_df[labels_df['numSample'] == frame_id]
+            if not labels_frame.empty:
+                first_row = labels_frame.iloc[0]
+                odometry_data = OdometryData.from_odometry(
+                    (first_row['ego_steering_wheel_deg'],
+                     first_row['ego_yaw_rate_deg_s'],
+                     first_row['ego_speed_kph']),
+                    timestamp_s
+                )
+
+        # c) Update tracker with ego motion compensation
+        active_tracks = manager.update(detections, ground_truth,
+                                       current_time=timestamp_s,
+                                       odometry=odometry_data)
 
         # Store data for comprehensive visualizations
         all_detections.append(detections)
