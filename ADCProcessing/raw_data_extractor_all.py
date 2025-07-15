@@ -11,6 +11,7 @@ import imageio
 from tqdm import tqdm
 from rpl import RadarSignalProcessing
 from DBReader.DBReader import SyncReader
+from utils.create_labels.camera_to_RA import calculate_radar_coords
 
 from utils.create_labels.main import process_images_with_tracking, process_images_without_tracking
 
@@ -58,9 +59,30 @@ def merge_labels(base_dir, car_labels_df):
     # Extract sample numbers from car labels filenames
     car_labels_df['sample_index'] = car_labels_df['filename'].str.extract(r'image_(\d+)\.jpg').astype(int)
 
+    # SCALE BOUNDING BOXES FROM 960x540 TO 1920x1080
+    scale_x = 1920 / 960  # 2.0
+    scale_y = 1080 / 540  # 2.0
+
+    # Scale all bounding box coordinates
+    car_labels_df['x1_pix'] = car_labels_df['x1_pix'] * scale_x
+    car_labels_df['y1_pix'] = car_labels_df['y1_pix'] * scale_y
+    car_labels_df['x2_pix'] = car_labels_df['x2_pix'] * scale_x
+    car_labels_df['y2_pix'] = car_labels_df['y2_pix'] * scale_y
+
+    # Convert to integers
+    car_labels_df['x1_pix'] = car_labels_df['x1_pix'].astype('Int64')
+    car_labels_df['y1_pix'] = car_labels_df['y1_pix'].astype('Int64')
+    car_labels_df['x2_pix'] = car_labels_df['x2_pix'].astype('Int64')
+    car_labels_df['y2_pix'] = car_labels_df['y2_pix'].astype('Int64')
+
+    # Apply radar coordinate calculation to car labels (after scaling)
+    radar_coords = car_labels_df.apply(calculate_radar_coords, axis=1)
+    car_labels_df['radar_R_m'] = radar_coords['radar_R_m']
+    car_labels_df['radar_A_deg'] = radar_coords['radar_A_deg']
+
     # Merge dataframes
     merged_df = existing_df.merge(
-        car_labels_df[['sample_index', 'x1_pix', 'y1_pix', 'x2_pix', 'y2_pix', 'ID']],
+        car_labels_df[['sample_index', 'x1_pix', 'y1_pix', 'x2_pix', 'y2_pix', 'ID', 'radar_R_m', 'radar_A_deg']],
         left_on='index',
         right_on='sample_index',
         how='left'
@@ -74,8 +96,6 @@ def merge_labels(base_dir, car_labels_df):
     merged_df['laser_Y_m'] = 0.0
     merged_df['radar_X_m'] = 0.0
     merged_df['radar_Y_m'] = 0.0
-    merged_df['radar_R_m'] = 0.0
-    merged_df['radar_A_deg'] = 0.0
     merged_df['radar_D_mps'] = 0.0
     merged_df['radar_P_db'] = 0.0
     merged_df['dataset'] = Path(base_dir).name
@@ -101,9 +121,13 @@ def merge_labels(base_dir, car_labels_df):
     # Reorder columns
     merged_df = merged_df[column_order]
 
+    # Fill all NaN values with 0
+    merged_df = merged_df.fillna(0)
+
     # Save merged labels
     merged_df.to_csv(existing_labels_path, index=False)
     print(f"Updated labels.csv with car detection data")
+
 def extract_all(config):
     # Load configuration
     cal_table = config['Calibration']

@@ -154,6 +154,8 @@ class PoorPerformanceAnalyzer:
 
         # Save detailed JSON report
         json_file = output_dir / f'worst_{self.metric_name}_analysis.json'
+        degradation_values = [f.degradation for f in all_frames]
+        degradation_values = degradation_values if degradation_values else 0.0
         analysis_data = {
             'metric_analyzed': self.metric_name,
             'total_frames_analyzed': len(all_frames),
@@ -170,12 +172,13 @@ class PoorPerformanceAnalyzer:
                 }
                 for f in worst_frames
             ],
+
             'degradation_statistics': {
-                'mean': np.mean([f.degradation for f in all_frames]),
-                'std': np.std([f.degradation for f in all_frames]),
-                'median': np.median([f.degradation for f in all_frames]),
-                'max': np.max([f.degradation for f in all_frames]),
-                'min': np.min([f.degradation for f in all_frames])
+                'mean': np.mean(degradation_values),
+                'std': np.std(degradation_values),
+                'median': np.median(degradation_values),
+                'max': np.max(degradation_values),
+                'min': np.min(degradation_values)
             }
         }
 
