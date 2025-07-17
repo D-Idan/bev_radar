@@ -72,7 +72,8 @@ def parse_recording(folder):
     return dict_sensor
 
 class SyncReader():
-    def __init__(self,folder,master=None,tolerance=200000,sync_mode='timestamp',silent=False):
+    def __init__(self,folder,master=None,tolerance=200000,
+                 sync_mode='timestamp',silent=False, camera_only=False):
         self.recorder_folder_path = Path(folder)
         self.sync_mode = sync_mode
         self.silent = silent
@@ -135,22 +136,23 @@ class SyncReader():
                or 'radar_ch2' not in self.dicts or 'radar_ch3' not in self.dicts):
                 print('Error: recording does not contains the 4 radar chips')
 
-            keys = ['camera']  # Only include camera
-            self.keys = keys
+            if camera_only == True:
+                keys = ['camera']  # Only include camera
+                self.keys = keys
+            else:
+                keys =list(self.dicts.keys())
+                self.keys = keys
 
-            # keys =list(self.dicts.keys())
-            # self.keys = keys
-            #
-            # if('gps' in self.dicts):
-            #     keys.remove('gps')
-            # if('preview' in self.dicts):
-            #     keys.remove('preview')
-            # if('None' in self.dicts):
-            #     keys.remove('None')
-            # keys.remove('radar_ch0')
-            # keys.remove('radar_ch1')
-            # keys.remove('radar_ch2')
-            # keys.remove('radar_ch3')
+                if('gps' in self.dicts):
+                    keys.remove('gps')
+                if('preview' in self.dicts):
+                    keys.remove('preview')
+                if('None' in self.dicts):
+                    keys.remove('None')
+                keys.remove('radar_ch0')
+                keys.remove('radar_ch1')
+                keys.remove('radar_ch2')
+                keys.remove('radar_ch3')
 
             self.table=[]
 

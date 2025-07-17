@@ -12,6 +12,7 @@ from tqdm import tqdm
 from rpl import RadarSignalProcessing
 from DBReader.DBReader import SyncReader
 from utils.create_labels.camera_to_RA import calculate_radar_coords
+from utils.create_labels.labels_utils import merge_cvpr_labels
 
 from utils.create_labels.main import process_images_with_tracking, process_images_without_tracking
 
@@ -144,7 +145,7 @@ def extract_all(config):
     ensure_dirs(base, subdirs)
 
     # Initialize readers and processors
-    db = SyncReader(root_folder, master='radar', tolerance=20000, silent=True)
+    db = SyncReader(root_folder, master='radar', tolerance=20000, silent=True, camera_only=True)
     RSP_RD = RadarSignalProcessing(cal_table, method='RD', lib='PyTorch')
     RSP_RA = RadarSignalProcessing(cal_table, method='RA', lib='PyTorch')
     RSP_ADC = RadarSignalProcessing(cal_table, method='ADC', lib='PyTorch')
@@ -243,6 +244,17 @@ def extract_all(config):
     except Exception as e:
         print(f"Error during car detection: {e}")
         print("Continuing without car labels...")
+
+    try:
+        labels_cvpr_path = config.get('label_path', '/mnt/data/datasets/radial/gd/raw_data/labels_CVPR.csv')
+        if os.path.exists(labels_cvpr_path):
+            updated_count = merge_cvpr_labels(base, labels_cvpr_path, root_folder, iou_threshold=0.001)
+            print(f"CVPR labels merge completed! Updated {updated_count} labels")
+        else:
+            print(f"CVPR labels file not found at {labels_cvpr_path}")
+    except Exception as e:
+        print(f"Error during CVPR labels merge: {e}")
+        print("Continuing without CVPR labels...")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Extract and organize RadIal data')

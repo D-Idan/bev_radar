@@ -134,3 +134,151 @@ def validate_image(image_path: str) -> bool:
         return img is not None
     except Exception:
         return False
+
+
+def merge_cvpr_labels(base_dir, labels_path, root_folder, iou_threshold=0.3):
+    """
+    Merge CVPR labels with existing labels.csv using IoU matching and timestamps
+
+    Args:
+        base_dir: Base directory containing labels.csv
+        labels_path: Path to labels_CVPR.csv file
+        root_folder: Root folder for SyncReader
+        iou_threshold: Minimum IoU threshold for matching bounding boxes
+    """
+    import pandas as pd
+    import numpy as np
+    from ADCProcessing.DBReader.DBReader import SyncReader
+    from utils.util import bbox_iou
+    from shapely.geometry import Polygon
+
+    # Read existing labels.csv
+    existing_labels_path = os.path.join(base_dir, 'labels.csv')
+    existing_df = pd.read_csv(existing_labels_path)
+
+    # Read CVPR labels
+    cvpr_df = pd.read_csv(labels_path)
+
+    # Initialize SyncReader to get timestamps
+    db = SyncReader(root_folder, master='radar', tolerance=20000, silent=True, camera_only=False)
+
+
+    # Add column to track CVPR updates
+    existing_df['cvpr_updated'] = False
+    existing_df['cvpr_iou'] = 0.0
+
+    # Create timestamp mapping for CVPR labels
+    cvpr_timestamps = {}
+
+    # Get timestamps for CVPR samples
+    for idx, row in cvpr_df.iterrows():
+        try:
+            # Extract frame index from CVPR data (assuming it has a frame/sample identifier)
+            if 'numSample' in cvpr_df.columns:
+                frame_idx = int(row['numSample'])
+            elif 'index' in cvpr_df.columns:
+                frame_idx = int(row['index'])
+            else:
+                # Try to extract from filename if available
+                if 'filename' in cvpr_df.columns:
+                    import re
+                    match = re.search(r'(\d+)', str(row['filename']))
+                    if match:
+                        frame_idx = int(match.group(1))
+                    else:
+                        continue
+                else:
+                    continue
+
+            # Get timestamp for this frame
+            if frame_idx < len(db):
+                sample = db.GetSensorData(frame_idx)
+                timestamp = sample['radar_ch1']['timestamp']
+
+                if timestamp not in cvpr_timestamps:
+                    cvpr_timestamps[timestamp] = []
+
+                cvpr_timestamps[timestamp].append({
+                    'cvpr_idx': idx,
+                    'x1_pix': row.get('x1_pix', 0),
+                    'y1_pix': row.get('y1_pix', 0),
+                    'x2_pix': row.get('x2_pix', 0),
+                    'y2_pix': row.get('y2_pix', 0),
+                    'radar_R_m': row.get('radar_R_m', 0),
+                    'radar_A_deg': row.get('radar_A_deg', 0),
+                    'radar_X_m': row.get('radar_X_m', 0),
+                    'radar_Y_m': row.get('radar_Y_m', 0),
+                    'radar_D_mps': row.get('radar_D_mps', 0),
+                    'radar_P_db': row.get('radar_P_db', 0)
+                })
+
+        except Exception as e:
+            print(f"Error processing CVPR row {idx}: {e}")
+            continue
+
+    # Process existing labels and match with CVPR
+    updated_count = 0
+    total_matches = 0
+
+    for idx, row in existing_df.iterrows():
+        timestamp = row['timestamp_us']
+
+        # Skip rows without bounding box data
+        if pd.isna(row['x1_pix']) or pd.isna(row['y1_pix']):
+            continue
+
+        # Check if we have CVPR data for this timestamp
+        if timestamp in cvpr_timestamps:
+            cvpr_detections = cvpr_timestamps[timestamp]
+
+            # Calculate IoU with all CVPR detections at this timestamp
+            best_iou = 0.0
+            best_match = None
+
+            # Current bounding box from existing labels
+            curr_bbox = np.array([
+                [row['x1_pix'], row['y1_pix']],  # top-left
+                [row['x2_pix'], row['y1_pix']],  # top-right
+                [row['x2_pix'], row['y2_pix']],  # bottom-right
+                [row['x1_pix'], row['y2_pix']]  # bottom-left
+            ]).flatten()
+
+            for cvpr_det in cvpr_detections:
+                # CVPR bounding box
+                cvpr_bbox = np.array([
+                    [cvpr_det['x1_pix'], cvpr_det['y1_pix']],  # top-left
+                    [cvpr_det['x2_pix'], cvpr_det['y1_pix']],  # top-right
+                    [cvpr_det['x2_pix'], cvpr_det['y2_pix']],  # bottom-right
+                    [cvpr_det['x1_pix'], cvpr_det['y2_pix']]  # bottom-left
+                ]).flatten()
+
+                # Calculate IoU using existing function
+                iou = bbox_iou(curr_bbox, cvpr_bbox.reshape(1, -1))[0]
+
+                if iou > best_iou:
+                    best_iou = iou
+                    best_match = cvpr_det
+
+
+            # Update if IoU is above threshold
+            if best_iou >= iou_threshold and best_match is not None:
+                # Update radar measurements with CVPR data
+                existing_df.at[idx, 'radar_R_m'] = best_match['radar_R_m']
+                existing_df.at[idx, 'radar_A_deg'] = best_match['radar_A_deg']
+                existing_df.at[idx, 'radar_X_m'] = best_match['radar_X_m']
+                existing_df.at[idx, 'radar_Y_m'] = best_match['radar_Y_m']
+                existing_df.at[idx, 'radar_D_mps'] = best_match['radar_D_mps']
+                existing_df.at[idx, 'radar_P_db'] = best_match['radar_P_db']
+
+                # Mark as updated
+                existing_df.at[idx, 'cvpr_updated'] = True
+                existing_df.at[idx, 'cvpr_iou'] = best_iou
+
+                updated_count += 1
+
+            total_matches += 1
+
+    # Save updated labels
+    existing_df.to_csv(existing_labels_path, index=False)
+
+    return updated_count
