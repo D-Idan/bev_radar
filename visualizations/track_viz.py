@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from radar_tracking import Detection, Track
 from copy import deepcopy
+
+from utils.radar_camera_relation import is_within_radar_coverage
 from visualization_config import VisualizationConfig as VizConfig
 
 
@@ -115,8 +117,15 @@ def visualize_frame_radar_azimuth(
         all_ranges.extend([d.range_m for d in detections])
 
     if ground_truth:
-        all_azimuths.extend([np.degrees(d.azimuth_rad) for d in ground_truth])
-        all_ranges.extend([d.range_m for d in ground_truth])
+        # Filter ground truth to only show points within radar coverage
+        filtered_ground_truth = []
+        for gt in ground_truth:
+            az_deg = np.degrees(gt.azimuth_rad)
+            if is_within_radar_coverage(az_deg, gt.range_m, radar_config):
+                filtered_ground_truth.append(gt)
+
+        all_azimuths.extend([np.degrees(d.azimuth_rad) for d in filtered_ground_truth])
+        all_ranges.extend([d.range_m for d in filtered_ground_truth])
 
     for track in active_tracks:
         range_m, azimuth_rad = track.kalman_polar_position
@@ -890,7 +899,9 @@ def visualize_all_frames_3d_overview(
         all_tracks: List[List[Track]],
         all_frames: List[int],
         frame_times: List[Tuple[int, float]],
-        output_dir: str
+        output_dir: str,
+        radar_config: Optional[dict] = None,
+
 ):
     """Create 3D visualization using actual stored prediction and update states."""
     prepare_output_directories(output_dir)
@@ -934,9 +945,11 @@ def visualize_all_frames_3d_overview(
 
         # Labels
         for gt in all_ground_truth[frame_idx]:
-            all_gt_times.append(timestamp)
-            all_gt_az.append(np.degrees(gt.azimuth_rad))
-            all_gt_rng.append(gt.range_m)
+            az_deg = np.degrees(gt.azimuth_rad)
+            if is_within_radar_coverage(az_deg, gt.range_m, radar_config):
+                all_gt_times.append(timestamp)
+                all_gt_az.append(az_deg)
+                all_gt_rng.append(gt.range_m)
 
         # Detections
         for det in all_detections[frame_idx]:
@@ -1179,14 +1192,17 @@ def visualize_tracking_temporal_evolution(
                 min_distance = float('inf')
                 distance_threshold = VizConfig.ASSOCIATION_DISTANCE['general_threshold']
 
+                # Ground truth data for this frame - filtered by coverage AND Euclidean distance
                 for gt in all_ground_truth[frame_idx]:
-                    # Convert ground truth to Cartesian
-                    gt_x, gt_y = polar_to_cartesian(gt.range_m, gt.azimuth_rad)
+                    # First check if within radar coverage
+                    gt_az_deg = np.degrees(gt.azimuth_rad)
+                    if not is_within_radar_coverage(gt_az_deg, gt.range_m, radar_config):
+                        continue  # Skip out-of-bounds ground truth
 
-                    # Calculate Euclidean distance
+                    # Then check Euclidean distance
+                    gt_x, gt_y = polar_to_cartesian(gt.range_m, gt.azimuth_rad)
                     euclidean_distance = np.sqrt((track_x - gt_x) ** 2 + (track_y - gt_y) ** 2)
 
-                    # Keep track of closest ground truth within threshold
                     if euclidean_distance <= distance_threshold and euclidean_distance < min_distance:
                         min_distance = euclidean_distance
                         closest_gt = gt

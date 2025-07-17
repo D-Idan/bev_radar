@@ -203,7 +203,10 @@ class PoorPerformanceAnalyzer:
         # 1. Histogram of degradation
         ax = axes[0, 0]
         degradations = [f.degradation for f in all_frames]
-        ax.hist(degradations, bins=30, alpha=0.7, color='blue', edgecolor='black')
+        if not np.isnan(degradations).all() and len(degradations) > 0:
+            ax.hist(degradations, bins=30, alpha=0.7, color='blue', edgecolor='black')
+        else:
+            return
         ax.axvline(np.mean(degradations), color='red', linestyle='--', label=f'Mean: {np.mean(degradations):.1f}%')
         ax.set_xlabel('Degradation (%)')
         ax.set_ylabel('Number of Frames')

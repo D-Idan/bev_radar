@@ -191,6 +191,7 @@ TOP 10 DATASETS BY FRAME COUNT
 
     # Save the figure
     plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
     print(f"Multi-plot analysis saved to: {output_path}")
 
     # Display complete dataset list in console for easy copying

@@ -439,7 +439,8 @@ def offline_tracking(
         all_tracks=all_tracks,
         all_frames=all_frames,
         frame_times=frame_times,
-        output_dir=str(output_paths['summary_plots'])
+        output_dir=str(output_paths['summary_plots']),
+        radar_config=config,
     )
 
     # e) Temporal evolution visualization
@@ -448,7 +449,8 @@ def offline_tracking(
         all_ground_truth=all_ground_truth,
         all_frames=all_frames,
         frame_times=frame_times,
-        output_dir=str(output_paths['summary_plots'])
+        output_dir=str(output_paths['summary_plots']),
+        radar_config = config,
     )
 
     # f) Kalman filter analysis for longest track

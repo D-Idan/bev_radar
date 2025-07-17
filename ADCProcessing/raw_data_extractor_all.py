@@ -151,10 +151,15 @@ def extract_all(config):
 
     # Process all frames
     frame_data = []
-    DEBUG = True
+    DEBUG = False
     db_len = 50 if DEBUG else len(db)
     for idx in tqdm(range(db_len), desc="Processing Samples", unit="sample", colour="magenta"):
-        sample = db.GetSensorData(idx)
+        try:
+            sample = db.GetSensorData(idx)
+        except (IndexError, Exception) as e:
+            print(f"Failed to get data for index {idx}: {e}")
+            continue
+
         tag = f"{idx:06d}"
 
         # Define all output file paths

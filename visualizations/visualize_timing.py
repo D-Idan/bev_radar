@@ -117,6 +117,7 @@ def plot_timing_analysis(labels_csv_path, output_path=None, remove_outliers_for_
 
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
     else:
         plt.show()
 
@@ -216,6 +217,7 @@ def plot_detailed_timing_analysis(labels_csv_path, output_path=None):
 
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
     else:
         plt.show()
 
