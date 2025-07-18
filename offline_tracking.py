@@ -228,7 +228,7 @@ def offline_tracking(
                              timestamps_df['timestamp_us']))
 
     # 2) Unique frame IDs (sample_id) in sorted order
-    all_frames = sorted(preds_df['sample_id'].unique().tolist())
+    all_frames = sorted(labels_df['numSample'].unique().tolist())
 
     # Limit frames for debugging if specified
     if max_frames is not None:
