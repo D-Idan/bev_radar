@@ -522,10 +522,22 @@ def visualize_frame_radar_azimuth(
                                        label=f'χ² 99.9% ({chi2_99_9:.3f})')
                             has_chi2_99_9 = True
 
-        # Adjust all text positions to avoid overlaps
+        # After setting axis limits but before adjust_text
+        ax.set_xlim(max_azimuth, min_azimuth)
+        ax.set_ylim(0, max_range)
+
+        # Force matplotlib to finalize the layout
+        fig.canvas.draw_idle()
+
+        # Now adjust text with explicit bounds
         if texts and not is_zoomed:
+            # Get the actual display bounds after layout is finalized
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+
             adjust_text(texts,
                         x=points_x, y=points_y,
+                        xlim=xlim, ylim=ylim,  # Explicitly pass limits
                         arrowprops=dict(arrowstyle='->', color='red', alpha=0.6, lw=0.5,
                                         shrinkA=10, shrinkB=5),
                         ax=ax,
@@ -537,6 +549,7 @@ def visualize_frame_radar_azimuth(
                         avoid_points=True,
                         avoid_self=True,
                         only_move={'points': 'y', 'text': 'xy'},
+
                         )
 
         return scatter
@@ -570,17 +583,16 @@ def visualize_frame_radar_azimuth(
     ax2.grid(True, alpha=0.3)
 
     # Add discrete colorbar for confidence
-    if detections:
-        from matplotlib.colors import ListedColormap, BoundaryNorm
-        conf_cmap = ListedColormap(CONF_COLORS)
-        norm = BoundaryNorm(CONF_BINS, conf_cmap.N)
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+    conf_cmap = ListedColormap(CONF_COLORS)
+    norm = BoundaryNorm(CONF_BINS, conf_cmap.N)
 
-        sm = plt.cm.ScalarMappable(cmap=conf_cmap, norm=norm)
-        sm.set_array([])
+    sm = plt.cm.ScalarMappable(cmap=conf_cmap, norm=norm)
+    sm.set_array([])
 
-        cbar = fig.colorbar(sm, ax=[ax1, ax2], label='Detection Confidence',
-                            ticks=[0.2, 0.5, 0.7, 0.85, 0.95]) # Center of each bin
-        cbar.set_ticklabels(CONF_LABELS)
+    cbar = fig.colorbar(sm, ax=[ax1, ax2], label='Detection Confidence',
+                        ticks=[0.2, 0.5, 0.7, 0.85, 0.95]) # Center of each bin
+    cbar.set_ticklabels(CONF_LABELS)
 
 
     # Draw rectangle on full view showing zoom area
