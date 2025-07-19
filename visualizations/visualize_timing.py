@@ -15,6 +15,8 @@ def plot_timing_analysis(labels_csv_path, output_path=None, remove_outliers_for_
     # Read and prepare data
     df = pd.read_csv(labels_csv_path)
     df = df.sort_values('timestamp_us')
+    # Keep only unique timestamps (first occurrence)
+    df = df.drop_duplicates(subset='timestamp_us', keep='first')
 
     # Calculate time differences in seconds
     df['time_diff_s'] = df['timestamp_us'].diff() / 1_000_000  # Convert to seconds
@@ -131,6 +133,8 @@ def plot_detailed_timing_analysis(labels_csv_path, output_path=None):
     # Read and prepare data
     df = pd.read_csv(labels_csv_path)
     df = df.sort_values('timestamp_us')
+    # Keep only unique timestamps (first occurrence)
+    df = df.drop_duplicates(subset='timestamp_us', keep='first')
 
     # Calculate time differences in seconds
     df['time_diff_s'] = df['timestamp_us'].diff() / 1_000_000
