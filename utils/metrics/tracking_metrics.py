@@ -92,12 +92,14 @@ class TrackingDetectionEvaluator:
             filtered_distances = distances
 
         # Update motmetrics accumulator for MOTA (using all labels)
-        self.acc.update(
-            gt_ids,
-            track_ids,
-            filtered_distances,
-            frameid=frame_id
-        )
+        # Only update if we have both tracks and ground truth
+        if len(track_ids) > 0 or len(gt_ids) > 0:
+            self.acc.update(
+                gt_ids,
+                track_ids,
+                filtered_distances,
+                frameid=frame_id
+            )
 
         # Store data for HOTA calculation (using all labels)
         self.hota_data['gt_ids_per_frame'][frame_id] = gt_ids
@@ -238,18 +240,24 @@ class TrackingDetectionEvaluator:
 
         total_det_a = 0
         total_ass_a = 0
-        num_frames = len(self.frame_results)
+        valid_frames = 0
 
         for frame in self.frame_results:
             metrics = frame['metrics']
             # Use tracking DetA as proxy for detection accuracy
-            total_det_a += metrics.get('tracking_det_a', 0)
+            det_a_value = metrics.get('tracking_det_a', 0)
             # Use tracking precision as proxy for association accuracy
-            total_ass_a += metrics.get('tracking_precision', 0)
+            ass_a_value = metrics.get('tracking_precision', 0)
 
-        if num_frames > 0:
-            avg_det_a = total_det_a / num_frames
-            avg_ass_a = total_ass_a / num_frames
+            # Only count frames with valid metrics
+            if det_a_value > 0 or ass_a_value > 0:
+                total_det_a += det_a_value
+                total_ass_a += ass_a_value
+                valid_frames += 1
+
+        if valid_frames > 0:
+            avg_det_a = total_det_a / valid_frames
+            avg_ass_a = total_ass_a / valid_frames
             # HOTA is geometric mean of detection and association accuracy
             hota = np.sqrt(avg_det_a * avg_ass_a) if avg_det_a > 0 and avg_ass_a > 0 else 0.0
         else:
@@ -282,7 +290,7 @@ class TrackingDetectionEvaluator:
             },
             'primary_metrics': {
                 'hota': float(hota),
-                'mota': float(summary['mota'].values[0]),
+                'mota': float(summary['mota'].values[0]) if not np.isnan(summary['mota'].values[0]) else 0.0,
                 'detection_precision': detection_metrics['precision'],
                 'detection_det_a': detection_metrics['det_a'],
                 'detection_iou': detection_metrics['iou'],
@@ -297,7 +305,10 @@ class TrackingDetectionEvaluator:
                 'recall': float(summary['recall'].values[0]) if not np.isnan(summary['recall'].values[0]) else 0.0
             },
             'detection_performance': detection_metrics,
-            'tracking_performance': tracking_metrics,
+            'tracking_performance': {**tracking_metrics,
+                                     'hota': float(hota),
+                                     'mota': float(summary['mota'].values[0]) if not
+                                     np.isnan(summary['mota'].values[0]) else 0.0},
             'camera_iou_performance': camera_iou_summary,
             'frame_by_frame_results': self.frame_results
         }
