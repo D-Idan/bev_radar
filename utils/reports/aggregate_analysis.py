@@ -16,7 +16,7 @@ class AggregateAnalysisGenerator:
     def __init__(self, key_metrics: Optional[List[str]] = None):
         """Initialize aggregate analysis generator."""
         self.key_metrics = key_metrics or [
-            'hota', 'mota', 'det_a', 'precision', 'tracking_iou'
+            'hota', 'mota', 'precision', 'det_a'
         ]
         self.distance_metrics = []
 

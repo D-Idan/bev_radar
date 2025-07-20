@@ -30,7 +30,7 @@ class ConfigurationComparisonAnalyzer:
     def __init__(self, key_metrics: Optional[List[str]] = None):
         """Initialize analyzer."""
         self.key_metrics = key_metrics or [
-            'hota', 'mota', 'precision', 'det_a', 'tracking_iou'
+            'hota', 'mota', 'precision', 'det_a'
         ]
         self.distance_metrics = ['mean_euclidean_distance', 'motp']
         self.iou_metrics = ['camera_iou_mean']

@@ -115,15 +115,13 @@ class TrackingDetectionEvaluator:
         camera_iou_result = self.camera_iou_calculator.evaluate_camera_iou_single_frame(
             predictions, gt_all, tracks, frame_id, image_shape=(540, 960)
         )
-        # Calculate DetA and IoU from camera results
-        camera_det_a_iou = self.camera_iou_calculator.calculate_det_a_and_iou_from_camera_results(camera_iou_result)
+        # Calculate DetA from camera results
+        camera_det_a = self.camera_iou_calculator.calculate_det_a_from_camera_results(camera_iou_result)
 
         # Override the placeholder values in frame_metrics with camera-based calculations
         frame_metrics.update({
-            'detection_det_a': camera_det_a_iou['detection_det_a'],
-            'detection_iou': camera_det_a_iou['detection_iou'],
-            'tracking_det_a': camera_det_a_iou['tracking_det_a'],
-            'tracking_iou': camera_det_a_iou['tracking_iou']
+            'detection_det_a': camera_det_a['detection_det_a'],
+            'tracking_det_a': camera_det_a['tracking_det_a']
         })
 
         frame_result = {
@@ -220,14 +218,12 @@ class TrackingDetectionEvaluator:
             'tracking_precision': tracking_precision
         })
 
-        # === DetA & IoU: Camera-based (always use ALL labels) ===
+        # === DetA: Camera-based (always use ALL labels) ===
         # These will be calculated by camera IoU module and combined later
         # For now, set placeholder values - they'll be overridden by camera IoU results
         metrics.update({
             'detection_det_a': 0.0,  # Will be calculated from camera IoU
-            'detection_iou': 0.0,  # Will be calculated from camera IoU
             'tracking_det_a': 0.0,  # Will be calculated from camera IoU
-            'tracking_iou': 0.0  # Will be calculated from camera IoU
         })
 
         return metrics
@@ -293,10 +289,8 @@ class TrackingDetectionEvaluator:
                 'mota': float(summary['mota'].values[0]) if not np.isnan(summary['mota'].values[0]) else 0.0,
                 'detection_precision': detection_metrics['precision'],
                 'detection_det_a': detection_metrics['det_a'],
-                'detection_iou': detection_metrics['iou'],
                 'tracking_precision': tracking_metrics['precision'],
                 'tracking_det_a': tracking_metrics['det_a'],
-                'tracking_iou': tracking_metrics['iou'],
                 'camera_iou_mean': camera_iou_summary['tracking_camera_iou']['mean']
             },
             'detailed_tracking_metrics': {
@@ -319,36 +313,30 @@ class TrackingDetectionEvaluator:
         """Aggregate detection-level metrics."""
         all_precision = []
         all_det_a = []
-        all_iou = []
 
         for frame in self.frame_results:
             metrics = frame['metrics']
             all_precision.append(metrics['detection_precision'])
             all_det_a.append(metrics['detection_det_a'])
-            all_iou.append(metrics['detection_iou'])
 
         return {
             'precision': np.mean(all_precision) if all_precision else 0.0,
-            'det_a': np.mean(all_det_a) if all_det_a else 0.0,
-            'iou': np.mean(all_iou) if all_iou else 0.0
+            'det_a': np.mean(all_det_a) if all_det_a else 0.0
         }
 
     def _aggregate_tracking_metrics(self) -> Dict:
         """Aggregate tracking-level metrics."""
         all_precision = []
         all_det_a = []
-        all_iou = []
 
         for frame in self.frame_results:
             metrics = frame['metrics']
             all_precision.append(metrics['tracking_precision'])
             all_det_a.append(metrics['tracking_det_a'])
-            all_iou.append(metrics['tracking_iou'])
 
         return {
             'precision': np.mean(all_precision) if all_precision else 0.0,
-            'det_a': np.mean(all_det_a) if all_det_a else 0.0,
-            'iou': np.mean(all_iou) if all_iou else 0.0
+            'det_a': np.mean(all_det_a) if all_det_a else 0.0
         }
 
     def _calculate_camera_iou_summary(self) -> Dict[str, Any]:
@@ -427,18 +415,12 @@ class TrackingDetectionEvaluator:
             track_det_a = metrics['tracking_det_a']
             det_a_improvement = ((track_det_a - det_det_a) / det_det_a * 100) if det_det_a > 0 else 0
 
-            det_iou = metrics['detection_iou']
-            track_iou = metrics['tracking_iou']
-            iou_improvement = ((track_iou - det_iou) / det_iou * 100) if det_iou > 0 else 0
-
             camera_iou = metrics['camera_iou_mean']
 
             f.write(
                 f"{'Precision (RA)':<20} {det_precision:<15.4f} {track_precision:<15.4f} {precision_improvement:>+13.1f}% {'Filtered' if summary['use_cvpr_labels_only'] else 'All':<15}\n")
             f.write(
                 f"{'DetA (Camera)':<20} {det_det_a:<15.4f} {track_det_a:<15.4f} {det_a_improvement:>+13.1f}% {'All Labels':<15}\n")
-            f.write(
-                f"{'IoU (Camera)':<20} {det_iou:<15.4f} {track_iou:<15.4f} {iou_improvement:>+13.1f}% {'All Labels':<15}\n")
             f.write(f"{'Camera IoU Mean':<20} {'-':<15} {camera_iou:<15.4f} {'-':<15} {'All Labels':<15}\n")
             f.write(f"{'HOTA':<20} {'-':<15} {metrics['hota']:<15.4f} {'-':<15} {'All Labels':<15}\n")
             f.write(f"{'MOTA':<20} {'-':<15} {metrics['mota']:<15.4f} {'-':<15} {'All Labels':<15}\n")

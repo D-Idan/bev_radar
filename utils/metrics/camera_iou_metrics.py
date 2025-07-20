@@ -301,15 +301,15 @@ class CameraIoUCalculator:
 
         return summary_results
 
-    def calculate_det_a_and_iou_from_camera_results(self, camera_iou_result: Dict) -> Dict[str, float]:
+    def calculate_det_a_from_camera_results(self, camera_iou_result: Dict) -> Dict[str, float]:
         """
-        Calculate DetA and IoU metrics from camera IoU results.
+        Calculate DetA metric from camera IoU results.
 
         Args:
             camera_iou_result: Result from evaluate_camera_iou_single_frame
 
         Returns:
-            Dictionary with DetA and IoU metrics
+            Dictionary with DetA metrics
         """
         # Extract IoU lists
         detection_ious = camera_iou_result.get('detection_vs_labels_ious', [])
@@ -325,33 +325,23 @@ class CameraIoUCalculator:
             # Count matches above IoU threshold
             detection_matches = sum(1 for iou in detection_ious if iou >= self.iou_threshold)
             detection_fp = num_predictions - detection_matches
-            detection_fn = num_labels - detection_matches
 
             detection_det_a = (detection_matches - detection_fp) / num_labels if num_labels > 0 else 0.0
-            detection_iou_metric = detection_matches / (detection_matches + detection_fp + detection_fn) if (
-                                                                                                                    detection_matches + detection_fp + detection_fn) > 0 else 0.0
         else:
             detection_det_a = 0.0 if num_labels == 0 else -num_predictions / num_labels
-            detection_iou_metric = 0.0
 
         # Calculate tracking metrics
         if tracking_ious:
             tracking_matches = sum(1 for iou in tracking_ious if iou >= self.iou_threshold)
             tracking_fp = num_tracks - tracking_matches
-            tracking_fn = num_labels - tracking_matches
 
             tracking_det_a = (tracking_matches - tracking_fp) / num_labels if num_labels > 0 else 0.0
-            tracking_iou_metric = tracking_matches / (tracking_matches + tracking_fp + tracking_fn) if (
-                                                                                                               tracking_matches + tracking_fp + tracking_fn) > 0 else 0.0
         else:
             tracking_det_a = 0.0 if num_labels == 0 else -num_tracks / num_labels
-            tracking_iou_metric = 0.0
 
         return {
             'detection_det_a': detection_det_a,
-            'detection_iou': detection_iou_metric,
-            'tracking_det_a': tracking_det_a,
-            'tracking_iou': tracking_iou_metric
+            'tracking_det_a': tracking_det_a
         }
 
 # Update the convenience function to include image_shape parameter
