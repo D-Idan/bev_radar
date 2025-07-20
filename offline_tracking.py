@@ -67,6 +67,8 @@ def setup_tracking_system():
 
         # Evaluation parameters
         'max_distance_threshold': 5.0,  # Distance threshold for valid associations
+        'use_camera_fov_filter': True,  # Filter detections outside camera FOV
+        'use_cvpr_labels_only': True,  # Use CVPR updated labels only for range-azimuth evaluation
     }
     manager = TrackletManager(tracker_config=tracker_config)
     return manager, tracker_config
@@ -121,13 +123,23 @@ def build_detections_for_frame(preds_df: pd.DataFrame, frame_id: int,
 
 def build_ground_truth_for_frame(
         labels_df: pd.DataFrame,
-        frame_id: int
+        frame_id: int,
+        use_cvpr_only: bool = True
 ) -> list[Detection]:
     """
     Convert ground‐truth (labels.csv) for that frame_id into Detection objects.
-    Assumes columns: numSample (→ sample_id), radar_R_m, radar_A_deg.
+
+    Args:
+        labels_df: Labels dataframe
+        frame_id: Frame ID to process
+        use_cvpr_only: If True, only use labels with cvpr_updated=True for range-azimuth
     """
     sub = labels_df[labels_df['numSample'] == frame_id]
+
+    # Filter for CVPR labels if requested (for range-azimuth evaluation)
+    if use_cvpr_only and 'cvpr_updated' in sub.columns:
+        sub = sub[sub['cvpr_updated'] == True]
+
     gt_list: list[Detection] = []
     for _, row in sub.iterrows():
         r = float(row['radar_R_m'])
@@ -138,6 +150,9 @@ def build_ground_truth_for_frame(
             confidence=1.0,  # ground truth = perfect confidence
             timestamp=float(frame_id)
         )
+        # Add ID if available
+        if 'ID' in row and not pd.isna(row['ID']):
+            gt._track_id = int(row['ID'])
         gt_list.append(gt)
     return gt_list
 
@@ -294,7 +309,8 @@ def offline_tracking(
         det_counts.append(len(detections))
 
         # b) Build ground truth for this frame
-        ground_truth = build_ground_truth_for_frame(labels_df, frame_id)
+        use_cvpr_only = config['use_cvpr_labels_only']
+        ground_truth = build_ground_truth_for_frame(labels_df, frame_id, use_cvpr_only)
 
         # Get odometry data for this frame from labels (if ego motion is enabled)
         odometry_data = None
@@ -511,12 +527,12 @@ def offline_tracking(
                         skip_initial_frames=config['min_hits'],
                         max_frame_gap_time=config['max_frame_gap_time'],
                         use_camera_fov_filter=config['use_camera_fov_filter'],
+                        use_cvpr_labels_only=config['use_cvpr_labels_only'],
 
     )
 
     # Run poor performance analysis if enabled
     if tracker_config.get('poor_performance_analysis', {}).get('enable', False):
-        print("\nAnalyzing frames with poor tracking performance...")
 
         # Get configuration name from output directory
         config_name = Path(output_dir).name
@@ -528,16 +544,12 @@ def offline_tracking(
         top_k = tracker_config['poor_performance_analysis'].get('top_k_worst_frames', 20)
 
         for metric in metrics_to_analyze:
-            print(f"  Analyzing {metric}...")
             worst_frames = analyze_poor_performance_for_configuration(
                 dataset_root=dataset_root,
                 config_name=config_name,
                 metric_name=metric,
                 top_k=top_k
             )
-
-            if worst_frames:
-                print(f"    Found {len(worst_frames)} worst frames for {metric}")
 
     # ===== ENHANCED VISUALIZATION AND VIDEO CREATION =====
     if create_video:
@@ -647,6 +659,8 @@ if __name__ == "__main__":
 
         # ========== EVALUATION PARAMETERS ==========
         'max_distance_threshold': 2.0,  # Distance threshold for valid associations in evaluation (meters)
+        'use_camera_fov_filter': True,  # Filter detections outside camera FOV
+        'use_cvpr_labels_only': True,  # Use CVPR updated labels only for range-azimuth evaluation
     }
 
     args = {

@@ -39,76 +39,53 @@ class PoorPerformanceAnalyzer:
         """
         self.metric_name = metric_name
         self.top_k = top_k
-        self.distance_metrics = ['mean_euclidean_distance', 'motp']
+        self.distance_metrics = []
+        self.primary_metrics = ['hota', 'mota', 'det_a', 'precision', 'tracking_iou', 'camera_iou_mean']
 
-    def analyze_poor_performance_frames(self,
-                                        evaluation_details_path: Path,
-                                        output_dir: Path) -> List[PoorPerformanceFrame]:
-        """
-        Analyze frames with poor performance compared to raw predictions.
-
-        Args:
-            evaluation_details_path: Path to evaluation_metrics_frame_details.json
-            output_dir: Directory to save analysis results
-
-        Returns:
-            List of PoorPerformanceFrame objects
-        """
-        # Load frame-by-frame evaluation data
+    def analyze_poor_performance_frames(self, evaluation_details_path: Path, output_dir: Path) -> List[
+        PoorPerformanceFrame]:
         with open(evaluation_details_path, 'r') as f:
             frame_data = json.load(f)
 
         frames_info = frame_data.get('frame_by_frame_results', [])
-
         if not frames_info:
-            print("No frame data found")
             return []
 
-        # Extract performance degradation for each frame
         poor_frames = []
-
         for frame_info in frames_info:
-            frame_id = frame_info['frame_id']
-
-            # Get detection (raw prediction) performance
-            detection_results = frame_info['detection_results']
-            tracking_results = frame_info['tracking_results']
+            frame_id = int(frame_info['frame_id'])  # Convert to int
 
             # Handle camera IoU separately
             if self.metric_name == 'camera_iou_mean':
                 camera_iou_data = frame_info.get('camera_iou_results', {})
-                raw_value = np.mean(camera_iou_data.get('detection_vs_labels_ious', [0]))
-                tracking_value = np.mean(camera_iou_data.get('tracking_vs_labels_ious', [0]))
+                raw_list = camera_iou_data.get('detection_vs_labels_ious', [])
+                raw_value = np.mean(raw_list) if raw_list else 0.0
+                track_list = camera_iou_data.get('tracking_vs_labels_ious', [])
+                tracking_value = np.mean(track_list) if track_list else 0.0
             else:
-                raw_value = detection_results.get(self.metric_name, 0)
-                tracking_value = tracking_results.get(self.metric_name, 0)
+                # Get values from metrics dictionary with prefixed keys
+                metrics = frame_info.get('metrics', {})
+                raw_value = metrics.get(f'detection_{self.metric_name}', 0)
+                tracking_value = metrics.get(f'tracking_{self.metric_name}', 0)
 
-            # Skip frames with no valid data
+            # Skip invalid frames
             if raw_value == 0 or raw_value == float('inf'):
                 continue
 
             # Calculate degradation
-            if self.metric_name in self.distance_metrics:
-                # For distance metrics, lower is better
-                if tracking_value == float('inf'):
-                    degradation = -100.0  # Worst possible
-                else:
-                    degradation = -((tracking_value - raw_value) / raw_value) * 100
-            else:
-                # For other metrics, higher is better
-                degradation = ((raw_value - tracking_value) / raw_value) * 100
+            degradation = ((raw_value - tracking_value) / raw_value) * 100
 
+            # Get counts with fallback values
             poor_frame = PoorPerformanceFrame(
                 frame_id=frame_id,
                 metric_name=self.metric_name,
                 raw_prediction_value=raw_value,
                 tracking_value=tracking_value,
                 degradation=degradation,
-                detection_count=frame_info['num_predictions'],
-                track_count=frame_info['num_tracks'],
-                ground_truth_count=frame_info['num_ground_truth']
+                detection_count=frame_info.get('num_predictions', 0),
+                track_count=frame_info.get('num_tracks', 0),
+                ground_truth_count=frame_info.get('num_ground_truth_total', 0)  # Updated key
             )
-
             poor_frames.append(poor_frame)
 
         # Sort by degradation (worst first)
@@ -187,11 +164,6 @@ class PoorPerformanceAnalyzer:
 
         # Create visualization
         self._create_degradation_visualization(all_frames, worst_frames, output_dir)
-
-        print(f"\nPoor performance analysis saved to:")
-        print(f"  - Summary: {txt_file}")
-        print(f"  - Frame IDs: {frame_ids_file}")
-        print(f"  - Detailed: {json_file}")
 
     def _create_degradation_visualization(self, all_frames: List[PoorPerformanceFrame],
                                           worst_frames: List[PoorPerformanceFrame],

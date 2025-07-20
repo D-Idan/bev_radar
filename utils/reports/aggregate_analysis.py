@@ -16,9 +16,9 @@ class AggregateAnalysisGenerator:
     def __init__(self, key_metrics: Optional[List[str]] = None):
         """Initialize aggregate analysis generator."""
         self.key_metrics = key_metrics or [
-            'precision', 'recall', 'f1_score', 'det_a', 'mean_euclidean_distance'
+            'hota', 'mota', 'det_a', 'precision', 'tracking_iou'
         ]
-        self.distance_metrics = ['mean_euclidean_distance', 'motp']
+        self.distance_metrics = []
 
         # Add IoU metrics
         self.iou_metrics = ['camera_iou_mean']
@@ -117,14 +117,9 @@ class AggregateAnalysisGenerator:
             for config in all_configs:
                 values = []
                 for dataset_name, dataset_metrics in all_datasets_metrics.items():
-                    if metric in self.iou_metrics:
-                        # IoU metrics are stored differently
-                        metric_data = (dataset_metrics.get('metrics_comparison', {})
-                                       .get(metric, {}).get(config, {}))
-                    else:
-                        # Standard metrics
-                        metric_data = (dataset_metrics.get('metrics_comparison', {})
-                                       .get(metric, {}).get(config, {}))
+                    # All metrics are now stored in the same way in metrics_comparison
+                    metric_data = (dataset_metrics.get('metrics_comparison', {})
+                                   .get(metric, {}).get(config, {}))
 
                     value = metric_data.get('value')
                     if value is not None and value != float('inf'):

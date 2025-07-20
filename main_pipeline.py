@@ -267,6 +267,7 @@ class RadarProcessingPipeline:
             # Evaluation parameters
             'max_distance_threshold': self.config['tracking']['evaluation']['max_distance_threshold'],
             'use_camera_fov_filter': self.config['tracking']['evaluation']['use_camera_fov_filter'],
+            'use_cvpr_labels_only': self.config['tracking']['evaluation']['use_cvpr_labels_only'],
 
             # Poor performance analysis
             'poor_performance_analysis': {
@@ -422,10 +423,8 @@ class RadarProcessingPipeline:
                 results[config_name] = False
 
         # Generate comparison report after all configurations complete
-        if any(results.values()) and len(results) > 1:
+        if any(results.values()):
             self._generate_configuration_comparison_report(target_value, results)
-        elif len(results) == 1:
-            print("    Single configuration run - skipping comparison report")
 
         return results
 
@@ -557,7 +556,7 @@ class RadarProcessingPipeline:
                 failed += 1
 
         # Generate aggregate analysis across all datasets (only if multiple configs)
-        if successful > 0 and (specific_configs is None or len(specific_configs) > 1):
+        if successful > 0:
             self.aggregate_analyzer.generate_aggregate_analysis(self.output_base)
 
         # Summary
@@ -569,10 +568,7 @@ class RadarProcessingPipeline:
         print(f"Failed: {failed}")
 
         if successful > 0:
-            if specific_configs is None or len(specific_configs) > 1:
-                print(f"\n✓ Aggregate analysis generated for {successful} datasets")
-            else:
-                print(f"\n📝 Single configuration mode - no aggregate analysis generated")
+            print(f"\n✓ Aggregate analysis generated for {successful} datasets")
 
         if failed > 0:
             print(f"\nSome datasets failed to process completely.")

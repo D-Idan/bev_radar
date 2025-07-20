@@ -13,7 +13,7 @@ import cv2
 class CameraIoUCalculator:
     """Calculate IoU between bounding boxes in camera image space."""
 
-    def __init__(self, image_width: int = 960, image_height: int = 540):
+    def __init__(self, image_width: int = 960, image_height: int = 540, iou_threshold: float = 0.2):
         """
         Initialize camera IoU calculator.
 
@@ -25,6 +25,7 @@ class CameraIoUCalculator:
         self.image_height = image_height
 
         self.labels_image_width, self.labels_image_height = 1920, 1080
+        self.iou_threshold = iou_threshold
 
     def _get_scale_factor(self, image_shape: Tuple[int, int]) -> Tuple[float, float]:
         """
@@ -300,6 +301,58 @@ class CameraIoUCalculator:
 
         return summary_results
 
+    def calculate_det_a_and_iou_from_camera_results(self, camera_iou_result: Dict) -> Dict[str, float]:
+        """
+        Calculate DetA and IoU metrics from camera IoU results.
+
+        Args:
+            camera_iou_result: Result from evaluate_camera_iou_single_frame
+
+        Returns:
+            Dictionary with DetA and IoU metrics
+        """
+        # Extract IoU lists
+        detection_ious = camera_iou_result.get('detection_vs_labels_ious', [])
+        tracking_ious = camera_iou_result.get('tracking_vs_labels_ious', [])
+
+        # Get counts
+        num_predictions = camera_iou_result['debug_info']['num_predictions']
+        num_tracks = camera_iou_result['debug_info']['num_tracks']
+        num_labels = camera_iou_result['debug_info']['num_labels']
+
+        # Calculate detection metrics
+        if detection_ious:
+            # Count matches above IoU threshold
+            detection_matches = sum(1 for iou in detection_ious if iou >= self.iou_threshold)
+            detection_fp = num_predictions - detection_matches
+            detection_fn = num_labels - detection_matches
+
+            detection_det_a = (detection_matches - detection_fp) / num_labels if num_labels > 0 else 0.0
+            detection_iou_metric = detection_matches / (detection_matches + detection_fp + detection_fn) if (
+                                                                                                                    detection_matches + detection_fp + detection_fn) > 0 else 0.0
+        else:
+            detection_det_a = 0.0 if num_labels == 0 else -num_predictions / num_labels
+            detection_iou_metric = 0.0
+
+        # Calculate tracking metrics
+        if tracking_ious:
+            tracking_matches = sum(1 for iou in tracking_ious if iou >= self.iou_threshold)
+            tracking_fp = num_tracks - tracking_matches
+            tracking_fn = num_labels - tracking_matches
+
+            tracking_det_a = (tracking_matches - tracking_fp) / num_labels if num_labels > 0 else 0.0
+            tracking_iou_metric = tracking_matches / (tracking_matches + tracking_fp + tracking_fn) if (
+                                                                                                               tracking_matches + tracking_fp + tracking_fn) > 0 else 0.0
+        else:
+            tracking_det_a = 0.0 if num_labels == 0 else -num_tracks / num_labels
+            tracking_iou_metric = 0.0
+
+        return {
+            'detection_det_a': detection_det_a,
+            'detection_iou': detection_iou_metric,
+            'tracking_det_a': tracking_det_a,
+            'tracking_iou': tracking_iou_metric
+        }
 
 # Update the convenience function to include image_shape parameter
 def calculate_camera_iou_metrics(predictions_csv: str, labels_csv: str,
@@ -430,7 +483,6 @@ def debug_detailed_iou():
             manual_iou = inter_area / union_area
             print(f"  Manual IoU calculation: {manual_iou}")
         print()
-
 
 def debug_real_data_alignment(predictions_csv, labels_csv, max_frames=5):
     """Debug the alignment between real predictions and labels"""

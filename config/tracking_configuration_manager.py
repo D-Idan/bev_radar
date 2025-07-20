@@ -90,6 +90,9 @@ class TrackingConfigurationManager:
             
             # Define parameters that should update nested kalman_config
             kalman_params = {'process_noise_q_std', 'measurement_noise_std', 'initial_pos_std', 'initial_vel_std'}
+
+            # Define evaluation parameters
+            evaluation_params = {'max_distance_threshold', 'use_camera_fov_filter', 'use_cvpr_labels_only'}
             
             for key, value in overrides.items():
                 if key in root_level_params:
@@ -105,6 +108,9 @@ class TrackingConfigurationManager:
                     if 'kalman_config' not in config['tracker_config']:
                         config['tracker_config']['kalman_config'] = {}
                     config['tracker_config']['kalman_config'][key] = value
+                elif key in evaluation_params:
+                    # Apply to tracker_config directly
+                    config['tracker_config'][key] = value
                 else:
                     # Apply to tracker_config
                     config['tracker_config'][key] = value

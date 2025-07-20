@@ -1,580 +1,457 @@
 """
-Comprehensive tracking and detection evaluation metrics.
-Implements precision, DetA, distance-based metrics, and general statistics.
+Tracking evaluation with HOTA, MOTA, IoU, DetA, and Precision metrics.
 """
-from pathlib import Path
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Tuple, Optional, Any
-from dataclasses import dataclass, asdict
+from pathlib import Path
+from typing import Dict, List, Optional, Any, Tuple
+import motmetrics as mm
+import json
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
-import json
 
 from utils.metrics.camera_iou_metrics import CameraIoUCalculator
-from utils.radar_camera_relation import is_radar_point_in_camera_view
-
-
-@dataclass
-class FrameMetrics:
-    """Container for single frame metrics."""
-    frame_id: int
-    eval_type: str
-    precision: float
-    recall: float
-    f1_score: float
-    det_a: float
-    mean_euclidean_distance: float
-    std_euclidean_distance: float
-    min_distance: float
-    max_distance: float
-    motp: float
-    true_positives: int
-    false_positives: int
-    false_negatives: int
-    total_associations: int
-
-
-@dataclass
-class AggregatedMetrics:
-    """Container for aggregated metrics across all frames."""
-    precision: float
-    recall: float
-    f1_score: float
-    det_a: float
-    mean_euclidean_distance: float
-    std_euclidean_distance: float
-    min_distance: float
-    max_distance: float
-    motp: float
-    total_associations: int
-    true_positives: int
-    false_positives: int
-    false_negatives: int
-    frames_evaluated: int
-    avg_detections_per_frame: float
-    avg_ground_truth_per_frame: float
 
 
 class TrackingDetectionEvaluator:
-    """Comprehensive evaluation for both detection and tracking performance."""
+    """
+    Tracking evaluation with HOTA, MOTA, IoU, DetA, and Precision metrics.
 
-    def __init__(self, distance_threshold: float = 5.0, iou_threshold: float = 0.3,
-                 use_camera_fov_filter: bool = True):
-        """Initialize evaluator with thresholds."""
+    Metric Categories:
+    - Precision: Range-azimuth based (uses radar coordinates)
+    - DetA, IoU: Camera bounding box based (uses pixel coordinates)
+    - MOTA, HOTA: Identity tracking (uses camera bounding boxes + track IDs)
+    - Camera IoU: Bounding box overlap (uses pixel coordinates)
+    """
+
+    def __init__(self, distance_threshold: float = 5.0, iou_threshold: float = 0.2,
+                 use_cvpr_labels_only: bool = True):
+        """
+        Initialize evaluator.
+
+        Args:
+            distance_threshold: Max distance for valid associations (meters)
+            iou_threshold: IoU threshold for evaluation
+            use_cvpr_labels_only: If True, only use labels with cvpr_updated=True for range-azimuth metrics
+        """
         self.distance_threshold = distance_threshold
         self.iou_threshold = iou_threshold
-        self.use_camera_fov_filter = use_camera_fov_filter
-        self.camera_iou_calculator = CameraIoUCalculator()
+        self.use_cvpr_labels_only = use_cvpr_labels_only
+        self.camera_iou_calculator = CameraIoUCalculator(iou_threshold=iou_threshold)
 
-        # Storage for evaluation data
+        # Initialize motmetrics accumulator for MOTA calculation
+        self.acc = mm.MOTAccumulator(auto_id=False)
+
+        # Store data for HOTA calculation
+        self.hota_data = {
+            'gt_ids_per_frame': {},
+            'pred_ids_per_frame': {},
+            'similarity_scores': {}
+        }
+
         self.frame_results = []
-        self.detection_frame_results = []
-        self.tracking_frame_results = []
-        self.camera_iou_results = []
 
     def evaluate_frame(self, predictions: pd.DataFrame, ground_truth: pd.DataFrame,
-                       tracks: pd.DataFrame, frame_id: int) -> Dict[str, Any]:
-        """Evaluate single frame performance for both detection and tracking."""
-        # Extract data for evaluation
-        pred_data = self._extract_detection_data(predictions)
-        gt_data = self._extract_ground_truth_data(ground_truth)
-        track_data = self._extract_tracking_data(tracks)
+                      tracks: pd.DataFrame, frame_id: int) -> Dict[str, Any]:
+        """Evaluate single frame."""
 
-        # Evaluate detection and tracking performance
-        detection_metrics = self._evaluate_associations(pred_data, gt_data, "detection", frame_id)
-        tracking_metrics = self._evaluate_associations(track_data, gt_data, "tracking", frame_id)
+        # For precision calculations (using range-azimuth maps), filter if needed
+        if self.use_cvpr_labels_only:
+            gt_ra = ground_truth[ground_truth['cvpr_updated'] == True].copy()
+        else:
+            gt_ra = ground_truth.copy()
 
-        # Camera IoU evaluation
-        camera_iou_result = self.camera_iou_calculator.evaluate_camera_iou_single_frame(
-            predictions, ground_truth, tracks, frame_id, image_shape=(540, 960)
+        # For all other metrics, always use all labels
+        gt_all = ground_truth.copy()
+
+        # Extract positions - for precision we use filtered (gt_ra), for others we use all (gt_all)
+        pred_positions = self._extract_positions(predictions, 'predictions')
+        track_positions = self._extract_positions(tracks, 'tracks')
+        gt_positions_ra = self._extract_positions(gt_ra, 'ground_truth')  # For precision
+        gt_positions_all = self._extract_positions(gt_all, 'ground_truth')  # For other metrics
+
+        # Get IDs - use all labels for tracking metrics
+        if 'ID' in gt_all.columns:
+            gt_ids = gt_all['ID'].values.astype(int)
+        else:
+            gt_ids = np.arange(len(gt_all))
+
+        track_ids = tracks['track_id'].values.astype(int) if 'track_id' in tracks.columns else np.arange(len(tracks))
+
+        # Calculate distance matrix for MOTA (using all labels)
+        if len(track_positions) > 0 and len(gt_positions_all) > 0:
+            distances = cdist(track_positions, gt_positions_all)
+        else:
+            distances = np.empty((0, 0))
+
+        # Apply distance threshold for motmetrics
+        if len(track_positions) > 0 and len(gt_positions_all) > 0:
+            filtered_distances = distances.copy()
+            filtered_distances[filtered_distances > self.distance_threshold] = np.nan
+        else:
+            filtered_distances = distances
+
+        # Update motmetrics accumulator for MOTA (using all labels)
+        self.acc.update(
+            gt_ids,
+            track_ids,
+            filtered_distances,
+            frameid=frame_id
         )
-        self.camera_iou_results.append(camera_iou_result)
+
+        # Store data for HOTA calculation (using all labels)
+        self.hota_data['gt_ids_per_frame'][frame_id] = gt_ids
+        self.hota_data['pred_ids_per_frame'][frame_id] = track_ids
+        self.hota_data['similarity_scores'][frame_id] = distances
+
+        # Calculate frame metrics (precision uses gt_ra, others use gt_all)
+        frame_metrics = self._calculate_frame_metrics(
+            pred_positions, track_positions, gt_positions_ra, gt_all
+        )
+
+        # Camera IoU evaluation (using ALL labels)
+        camera_iou_result = self.camera_iou_calculator.evaluate_camera_iou_single_frame(
+            predictions, gt_all, tracks, frame_id, image_shape=(540, 960)
+        )
+        # Calculate DetA and IoU from camera results
+        camera_det_a_iou = self.camera_iou_calculator.calculate_det_a_and_iou_from_camera_results(camera_iou_result)
+
+        # Override the placeholder values in frame_metrics with camera-based calculations
+        frame_metrics.update({
+            'detection_det_a': camera_det_a_iou['detection_det_a'],
+            'detection_iou': camera_det_a_iou['detection_iou'],
+            'tracking_det_a': camera_det_a_iou['tracking_det_a'],
+            'tracking_iou': camera_det_a_iou['tracking_iou']
+        })
 
         frame_result = {
             'frame_id': frame_id,
-            'detection_results': asdict(detection_metrics),
-            'tracking_results': asdict(tracking_metrics),
+            'metrics': frame_metrics,
             'camera_iou_results': camera_iou_result,
             'num_predictions': len(predictions),
-            'num_ground_truth': len(ground_truth),
+            'num_ground_truth_total': len(ground_truth),
+            'num_ground_truth_cvpr': len(gt_ra),
             'num_tracks': len(tracks)
         }
 
         self.frame_results.append(frame_result)
-        self.detection_frame_results.append(detection_metrics)
-        self.tracking_frame_results.append(tracking_metrics)
-
         return frame_result
 
-    def _extract_detection_data(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
-        """Extract detection data from dataframe."""
+    def _extract_positions(self, df: pd.DataFrame, data_type: str) -> np.ndarray:
+        """Extract positions from dataframe."""
         if df.empty:
-            return {'positions': np.zeros((0, 2)), 'confidences': np.zeros(0)}
+            return np.zeros((0, 2))
 
-        # Filter by camera FOV if enabled
-        if self.use_camera_fov_filter and 'range_m' in df.columns and 'azimuth_deg' in df.columns:
-            # Filter to keep only detections visible in camera
-            visible_mask = df.apply(
-                lambda row: is_radar_point_in_camera_view(row['range_m'], row['azimuth_deg']),
-                axis=1
-            )
-            df = df[visible_mask].copy()
-
-            if df.empty:  # All detections were filtered out
-                return {'positions': np.zeros((0, 2)), 'confidences': np.zeros(0)}
-
-        ranges = df['range_m'].values
-        azimuths = np.deg2rad(df['azimuth_deg'].values)
-        x = ranges * np.sin(azimuths)
-        y = ranges * np.cos(azimuths)
-        positions = np.column_stack([x, y])
-        confidences = df['confidence'].values if 'confidence' in df.columns else np.ones(len(df))
-
-        return {'positions': positions, 'confidences': confidences}
-
-    def _extract_ground_truth_data(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
-        """Extract ground truth data from dataframe."""
-        if df.empty:
-            return {'positions': np.zeros((0, 2))}
-
-        if 'radar_R_m' in df.columns and 'radar_A_deg' in df.columns:
-            ranges = df['radar_R_m'].values
-            azimuths = np.deg2rad(df['radar_A_deg'].values)
-            x = ranges * np.sin(azimuths)
-            y = ranges * np.cos(azimuths)
-            positions = np.column_stack([x, y])
+        if data_type == 'ground_truth':
+            # Use radar coordinates from labels
+            if 'radar_X_m' in df.columns and 'radar_Y_m' in df.columns:
+                x = df['radar_X_m'].values
+                y = df['radar_Y_m'].values
+            elif 'radar_R_m' in df.columns and 'radar_A_deg' in df.columns:
+                # Fallback to polar coordinates
+                ranges = df['radar_R_m'].values
+                azimuths = np.deg2rad(df['radar_A_deg'].values)
+                x = ranges * np.sin(azimuths)
+                y = ranges * np.cos(azimuths)
+            else:
+                raise ValueError(f"Missing required radar coordinate columns for {data_type}")
         else:
-            positions = np.zeros((0, 2))
+            # Predictions and tracks
+            if 'range_m' in df.columns and 'azimuth_deg' in df.columns:
+                ranges = df['range_m'].values
+                azimuths = np.deg2rad(df['azimuth_deg'].values)
+                x = ranges * np.sin(azimuths)
+                y = ranges * np.cos(azimuths)
+            else:
+                return np.zeros((0, 2))
 
-        return {'positions': positions}
+        return np.column_stack([x, y])
 
-    def _extract_tracking_data(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
-        """Extract tracking data from dataframe."""
-        if df.empty:
-            return {'positions': np.zeros((0, 2)), 'confidences': np.zeros(0), 'track_ids': np.zeros(0)}
+    def _calculate_frame_metrics(self, pred_pos: np.ndarray, track_pos: np.ndarray,
+                                 gt_pos_ra: np.ndarray, ground_truth_all: pd.DataFrame) -> Dict:
+        """Calculate Precision (RA), DetA, and IoU (camera) for the frame.
 
-        # Filter by camera FOV if enabled
-        if self.use_camera_fov_filter and 'range_m' in df.columns and 'azimuth_deg' in df.columns:
-            # Filter to keep only tracks visible in camera
-            visible_mask = df.apply(
-                lambda row: is_radar_point_in_camera_view(row['range_m'], row['azimuth_deg']),
-                axis=1
-            )
-            df = df[visible_mask].copy()
+        IMPORTANT:
+        - Precision uses gt_pos_ra (may be filtered by use_cvpr_labels_only for RA maps)
+        - DetA & IoU always use ALL labels regardless of use_cvpr_labels_only flag
 
-            if df.empty:  # All tracks were filtered out
-                return {'positions': np.zeros((0, 2)), 'confidences': np.zeros(0), 'track_ids': np.zeros(0)}
+        Args:
+            pred_pos: Prediction positions in RA space (for precision only)
+            track_pos: Track positions in RA space (for precision only)
+            gt_pos_ra: Ground truth positions for precision (may be filtered by cvpr_updated)
+            ground_truth_all: Full unfiltered ground truth DataFrame (for camera-based DetA, IoU)
 
-        ranges = df['range_m'].values
-        azimuths = np.deg2rad(df['azimuth_deg'].values)
-        x = ranges * np.sin(azimuths)
-        y = ranges * np.cos(azimuths)
-        positions = np.column_stack([x, y])
-        confidences = df['confidence'].values if 'confidence' in df.columns else np.ones(len(df))
-        track_ids = df['track_id'].values if 'track_id' in df.columns else np.arange(len(df))
+        Returns:
+            Dictionary containing detection and tracking metrics
+        """
+        metrics = {}
 
-        return {'positions': positions, 'confidences': confidences, 'track_ids': track_ids}
+        # === PRECISION: Range-Azimuth based (can use filtered labels) ===
+        num_gt_ra = len(gt_pos_ra)
 
-    def _evaluate_associations(self, pred_data: Dict, gt_data: Dict,
-                               eval_type: str, frame_id: int) -> FrameMetrics:
-        """Evaluate associations between predictions/tracks and ground truth."""
-        pred_positions = pred_data['positions']
-        gt_positions = gt_data['positions']
-
-        if len(pred_positions) == 0 or len(gt_positions) == 0:
-            return FrameMetrics(
-                frame_id=frame_id, eval_type=eval_type, precision=0.0, recall=0.0,
-                f1_score=0.0, det_a=0.0, mean_euclidean_distance=float('inf'),
-                std_euclidean_distance=0.0, min_distance=float('inf'), max_distance=0.0,
-                motp=float('inf'), true_positives=0, false_positives=len(pred_positions),
-                false_negatives=len(gt_positions), total_associations=0
-            )
-
-        # Calculate distance matrix and optimal assignment
-        distances = cdist(pred_positions, gt_positions)
-        pred_indices, gt_indices = linear_sum_assignment(distances)
-
-        # Determine valid matches
-        valid_matches_mask = distances[pred_indices, gt_indices] <= self.distance_threshold
-        valid_distances = distances[pred_indices, gt_indices][valid_matches_mask]
-
-        # Calculate metrics
-        true_positives = len(valid_distances)
-        false_positives = len(pred_positions) - true_positives
-        false_negatives = len(gt_positions) - true_positives
-
-        precision = true_positives / len(pred_positions) if len(pred_positions) > 0 else 0.0
-        recall = true_positives / len(gt_positions) if len(gt_positions) > 0 else 0.0
-        f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
-        det_a = true_positives / (true_positives + false_positives + false_negatives) if (true_positives + false_positives + false_negatives) > 0 else 0.0
-
-        # Distance-based metrics
-        if len(valid_distances) > 0:
-            mean_euclidean_distance = float(np.mean(valid_distances))
-            std_euclidean_distance = float(np.std(valid_distances))
-            min_distance = float(np.min(valid_distances))
-            max_distance = float(np.max(valid_distances))
-            motp = mean_euclidean_distance
+        # Detection precision (RA-based)
+        if len(pred_pos) > 0 and len(gt_pos_ra) > 0:
+            distances_ra = cdist(pred_pos, gt_pos_ra)
+            pred_indices, gt_indices = linear_sum_assignment(distances_ra)
+            valid_matches = distances_ra[pred_indices, gt_indices] <= self.distance_threshold
+            tp_precision = np.sum(valid_matches)
+            fp_precision = len(pred_pos) - tp_precision
+            detection_precision = tp_precision / (tp_precision + fp_precision) if (
+                                                                                              tp_precision + fp_precision) > 0 else 0.0
         else:
-            mean_euclidean_distance = float('inf')
-            std_euclidean_distance = 0.0
-            min_distance = float('inf')
-            max_distance = 0.0
-            motp = float('inf')
+            detection_precision = 0.0
 
-        return FrameMetrics(
-            frame_id=frame_id, eval_type=eval_type, precision=precision, recall=recall,
-            f1_score=f1_score, det_a=det_a, mean_euclidean_distance=mean_euclidean_distance,
-            std_euclidean_distance=std_euclidean_distance, min_distance=min_distance,
-            max_distance=max_distance, motp=motp, true_positives=true_positives,
-            false_positives=false_positives, false_negatives=false_negatives,
-            total_associations=true_positives
-        )
-
-    def _aggregate_metrics(self, frame_results: List[FrameMetrics], eval_type: str) -> AggregatedMetrics:
-        """Aggregate metrics across all frames."""
-        if not frame_results:
-            return AggregatedMetrics(
-                precision=0.0, recall=0.0, f1_score=0.0, det_a=0.0,
-                mean_euclidean_distance=float('inf'), std_euclidean_distance=0.0,
-                min_distance=float('inf'), max_distance=0.0, motp=float('inf'),
-                total_associations=0, true_positives=0, false_positives=0, false_negatives=0,
-                frames_evaluated=0, avg_detections_per_frame=0.0, avg_ground_truth_per_frame=0.0
-            )
-
-        # Sum up counts
-        total_tp = sum(result.true_positives for result in frame_results)
-        total_fp = sum(result.false_positives for result in frame_results)
-        total_fn = sum(result.false_negatives for result in frame_results)
-
-        # Calculate overall metrics
-        precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
-        recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
-        f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
-        det_a = total_tp / (total_tp + total_fp + total_fn) if (total_tp + total_fp + total_fn) > 0 else 0.0
-
-        # Distance metrics
-        valid_distances = [r.mean_euclidean_distance for r in frame_results if r.mean_euclidean_distance != float('inf')]
-        if valid_distances:
-            mean_euclidean_distance = float(np.mean(valid_distances))
-            std_euclidean_distance = float(np.std(valid_distances))
-            min_distance = float(np.min(valid_distances))
-            max_distance = float(np.max(valid_distances))
-            motp = mean_euclidean_distance
+        # Tracking precision (RA-based)
+        if len(track_pos) > 0 and len(gt_pos_ra) > 0:
+            distances_ra = cdist(track_pos, gt_pos_ra)
+            track_indices, gt_indices = linear_sum_assignment(distances_ra)
+            valid_matches = distances_ra[track_indices, gt_indices] <= self.distance_threshold
+            tp_precision = np.sum(valid_matches)
+            fp_precision = len(track_pos) - tp_precision
+            tracking_precision = tp_precision / (tp_precision + fp_precision) if (
+                                                                                             tp_precision + fp_precision) > 0 else 0.0
         else:
-            mean_euclidean_distance = float('inf')
-            std_euclidean_distance = 0.0
-            min_distance = float('inf')
-            max_distance = 0.0
-            motp = float('inf')
+            tracking_precision = 0.0
 
-        # Frame statistics
-        frames_evaluated = len(frame_results)
-        if eval_type == "detection":
-            avg_detections_per_frame = np.mean([r['num_predictions'] for r in self.frame_results])
+        metrics.update({
+            'detection_precision': detection_precision,
+            'tracking_precision': tracking_precision
+        })
+
+        # === DetA & IoU: Camera-based (always use ALL labels) ===
+        # These will be calculated by camera IoU module and combined later
+        # For now, set placeholder values - they'll be overridden by camera IoU results
+        metrics.update({
+            'detection_det_a': 0.0,  # Will be calculated from camera IoU
+            'detection_iou': 0.0,  # Will be calculated from camera IoU
+            'tracking_det_a': 0.0,  # Will be calculated from camera IoU
+            'tracking_iou': 0.0  # Will be calculated from camera IoU
+        })
+
+        return metrics
+
+    def _calculate_hota(self) -> float:
+        """Calculate HOTA (Higher Order Tracking Accuracy) metric."""
+        # Simplified HOTA calculation
+        # Full HOTA requires complex association calculation across all frames
+        # This is a simplified version focusing on detection and association accuracy
+
+        total_det_a = 0
+        total_ass_a = 0
+        num_frames = len(self.frame_results)
+
+        for frame in self.frame_results:
+            metrics = frame['metrics']
+            # Use tracking DetA as proxy for detection accuracy
+            total_det_a += metrics.get('tracking_det_a', 0)
+            # Use tracking precision as proxy for association accuracy
+            total_ass_a += metrics.get('tracking_precision', 0)
+
+        if num_frames > 0:
+            avg_det_a = total_det_a / num_frames
+            avg_ass_a = total_ass_a / num_frames
+            # HOTA is geometric mean of detection and association accuracy
+            hota = np.sqrt(avg_det_a * avg_ass_a) if avg_det_a > 0 and avg_ass_a > 0 else 0.0
         else:
-            avg_detections_per_frame = np.mean([r['num_tracks'] for r in self.frame_results])
-        avg_ground_truth_per_frame = np.mean([r['num_ground_truth'] for r in self.frame_results])
+            hota = 0.0
 
-        return AggregatedMetrics(
-            precision=precision, recall=recall, f1_score=f1_score, det_a=det_a,
-            mean_euclidean_distance=mean_euclidean_distance, std_euclidean_distance=std_euclidean_distance,
-            min_distance=min_distance, max_distance=max_distance, motp=motp,
-            total_associations=total_tp, true_positives=total_tp, false_positives=total_fp,
-            false_negatives=total_fn, frames_evaluated=frames_evaluated,
-            avg_detections_per_frame=avg_detections_per_frame, avg_ground_truth_per_frame=avg_ground_truth_per_frame
-        )
-
-    def _calculate_camera_iou_summary(self) -> Dict[str, Any]:
-        """Calculate camera IoU summary statistics."""
-        all_detection_camera_ious = []
-        all_tracking_camera_ious = []
-
-        for result in self.camera_iou_results:
-            all_detection_camera_ious.extend(result['detection_vs_labels_ious'])
-            if result['tracking_vs_labels_ious'] is not None:
-                all_tracking_camera_ious.extend(result['tracking_vs_labels_ious'])
-
-        return {
-            'detection_camera_iou': {
-                'mean': float(np.mean(all_detection_camera_ious)) if all_detection_camera_ious else 0.0,
-                'std': float(np.std(all_detection_camera_ious)) if all_detection_camera_ious else 0.0,
-                'median': float(np.median(all_detection_camera_ious)) if all_detection_camera_ious else 0.0,
-                'count': len(all_detection_camera_ious)
-            },
-            'tracking_camera_iou': {
-                'mean': float(np.mean(all_tracking_camera_ious)) if all_tracking_camera_ious else 0.0,
-                'std': float(np.std(all_tracking_camera_ious)) if all_tracking_camera_ious else 0.0,
-                'median': float(np.median(all_tracking_camera_ious)) if all_tracking_camera_ious else 0.0,
-                'count': len(all_tracking_camera_ious)
-            }
-        }
-
-    def _calculate_improvements(self, tracking_metrics: AggregatedMetrics,
-                                detection_metrics: AggregatedMetrics) -> Dict[str, Dict[str, float]]:
-        """Calculate improvement percentages between tracking and detection."""
-        def calc_improvement(tracking_val, detection_val):
-            if detection_val == 0:
-                return float('inf') if tracking_val > 0 else 0.0
-            if detection_val == float('inf'):
-                return -100.0 if tracking_val != float('inf') else 0.0
-            return ((tracking_val - detection_val) / detection_val) * 100
-
-        return {
-            'precision': {
-                'detection': detection_metrics.precision,
-                'tracking': tracking_metrics.precision,
-                'improvement_percent': calc_improvement(tracking_metrics.precision, detection_metrics.precision)
-            },
-            'recall': {
-                'detection': detection_metrics.recall,
-                'tracking': tracking_metrics.recall,
-                'improvement_percent': calc_improvement(tracking_metrics.recall, detection_metrics.recall)
-            },
-            'f1_score': {
-                'detection': detection_metrics.f1_score,
-                'tracking': tracking_metrics.f1_score,
-                'improvement_percent': calc_improvement(tracking_metrics.f1_score, detection_metrics.f1_score)
-            },
-            'det_a': {
-                'detection': detection_metrics.det_a,
-                'tracking': tracking_metrics.det_a,
-                'improvement_percent': calc_improvement(tracking_metrics.det_a, detection_metrics.det_a)
-            },
-            'mean_euclidean_distance_m': {
-                'detection': detection_metrics.mean_euclidean_distance,
-                'tracking': tracking_metrics.mean_euclidean_distance,
-                'improvement_percent': -calc_improvement(tracking_metrics.mean_euclidean_distance,
-                                                         detection_metrics.mean_euclidean_distance)
-            },
-            'motp_m': {
-                'detection': detection_metrics.motp,
-                'tracking': tracking_metrics.motp,
-                'improvement_percent': -calc_improvement(tracking_metrics.motp, detection_metrics.motp)
-            }
-        }
+        return hota
 
     def generate_comprehensive_report(self) -> Dict[str, Any]:
-        """Generate the single source of truth for all evaluation metrics."""
-        if not self.frame_results:
-            return {'error': 'No evaluation data available'}
+        """Generate final report with HOTA, MOTA, IoU, DetA, and Precision."""
 
-        # Aggregate metrics
-        detection_metrics = self._aggregate_metrics(self.detection_frame_results, "detection")
-        tracking_metrics = self._aggregate_metrics(self.tracking_frame_results, "tracking")
+        # Calculate motmetrics summary for MOTA
+        mh = mm.metrics.create()
+        summary = mh.compute(self.acc, metrics=['mota', 'motp', 'precision', 'recall',
+                                               'num_switches'],
+                            name='acc')
 
-        # Calculate improvements and camera IoU
-        improvements = self._calculate_improvements(tracking_metrics, detection_metrics)
+        # Calculate aggregate metrics
+        detection_metrics = self._aggregate_detection_metrics()
+        tracking_metrics = self._aggregate_tracking_metrics()
         camera_iou_summary = self._calculate_camera_iou_summary()
 
-        return {
+        # Calculate HOTA
+        hota = self._calculate_hota()
+
+        report = {
             'evaluation_summary': {
                 'frames_evaluated': len(self.frame_results),
                 'distance_threshold_m': self.distance_threshold,
-                'iou_threshold': self.iou_threshold
+                'use_cvpr_labels_only': self.use_cvpr_labels_only
             },
-            'detection_performance': asdict(detection_metrics),
-            'tracking_performance': asdict(tracking_metrics),
-            'performance_comparison': improvements,
+            'primary_metrics': {
+                'hota': float(hota),
+                'mota': float(summary['mota'].values[0]),
+                'detection_precision': detection_metrics['precision'],
+                'detection_det_a': detection_metrics['det_a'],
+                'detection_iou': detection_metrics['iou'],
+                'tracking_precision': tracking_metrics['precision'],
+                'tracking_det_a': tracking_metrics['det_a'],
+                'tracking_iou': tracking_metrics['iou'],
+                'camera_iou_mean': camera_iou_summary['tracking_camera_iou']['mean']
+            },
+            'detailed_tracking_metrics': {
+                'motp': float(summary['motp'].values[0]) if not np.isnan(summary['motp'].values[0]) else None,
+                'num_switches': int(summary['num_switches'].values[0]),
+                'recall': float(summary['recall'].values[0]) if not np.isnan(summary['recall'].values[0]) else 0.0
+            },
+            'detection_performance': detection_metrics,
+            'tracking_performance': tracking_metrics,
             'camera_iou_performance': camera_iou_summary,
             'frame_by_frame_results': self.frame_results
         }
 
-    def save_json_report(self, output_path: str) -> None:
-        """Save comprehensive JSON report split into summary and detailed frame files."""
+        return report
+
+    def _aggregate_detection_metrics(self) -> Dict:
+        """Aggregate detection-level metrics."""
+        all_precision = []
+        all_det_a = []
+        all_iou = []
+
+        for frame in self.frame_results:
+            metrics = frame['metrics']
+            all_precision.append(metrics['detection_precision'])
+            all_det_a.append(metrics['detection_det_a'])
+            all_iou.append(metrics['detection_iou'])
+
+        return {
+            'precision': np.mean(all_precision) if all_precision else 0.0,
+            'det_a': np.mean(all_det_a) if all_det_a else 0.0,
+            'iou': np.mean(all_iou) if all_iou else 0.0
+        }
+
+    def _aggregate_tracking_metrics(self) -> Dict:
+        """Aggregate tracking-level metrics."""
+        all_precision = []
+        all_det_a = []
+        all_iou = []
+
+        for frame in self.frame_results:
+            metrics = frame['metrics']
+            all_precision.append(metrics['tracking_precision'])
+            all_det_a.append(metrics['tracking_det_a'])
+            all_iou.append(metrics['tracking_iou'])
+
+        return {
+            'precision': np.mean(all_precision) if all_precision else 0.0,
+            'det_a': np.mean(all_det_a) if all_det_a else 0.0,
+            'iou': np.mean(all_iou) if all_iou else 0.0
+        }
+
+    def _calculate_camera_iou_summary(self) -> Dict[str, Any]:
+        """Calculate camera IoU summary statistics."""
+        all_detection_ious = []
+        all_tracking_ious = []
+
+        for result in self.frame_results:
+            camera_result = result['camera_iou_results']
+            all_detection_ious.extend(camera_result.get('detection_vs_labels_ious', []))
+            if camera_result.get('tracking_vs_labels_ious'):
+                all_tracking_ious.extend(camera_result['tracking_vs_labels_ious'])
+
+        return {
+            'detection_camera_iou': {
+                'mean': float(np.mean(all_detection_ious)) if all_detection_ious else 0.0,
+                'count': len(all_detection_ious)
+            },
+            'tracking_camera_iou': {
+                'mean': float(np.mean(all_tracking_ious)) if all_tracking_ious else 0.0,
+                'count': len(all_tracking_ious)
+            }
+        }
+
+    def save_reports(self, output_path: str):
+        """Save evaluation reports."""
         report = self.generate_comprehensive_report()
-
-        # Convert numpy types for JSON serialization
-        def convert_numpy_types(obj):
-            if isinstance(obj, np.integer):
-                return int(obj)
-            elif isinstance(obj, np.floating):
-                return float(obj)
-            elif isinstance(obj, np.ndarray):
-                return obj.tolist()
-            elif isinstance(obj, dict):
-                return {key: convert_numpy_types(value) for key, value in obj.items()}
-            elif isinstance(obj, list):
-                return [convert_numpy_types(item) for item in obj]
-            return obj
-
-        report = convert_numpy_types(report)
 
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Split the report into summary and detailed files
-        summary_report = {k: v for k, v in report.items() if k != 'frame_by_frame_results'}
-        frame_details = report.get('frame_by_frame_results', [])
-
-        # Save summary metrics (lightweight for aggregation)
+        # Save summary
         summary_path = output_path.parent / f"{output_path.stem}_summary{output_path.suffix}"
+        summary_report = {k: v for k, v in report.items() if k != 'frame_by_frame_results'}
         with open(summary_path, 'w') as f:
-            json.dump(summary_report, f, indent=2)
+            json.dump(summary_report, f, indent=2, default=str)
 
-        # Save detailed frame-by-frame results (heavy data)
+        # Save frame details
         details_path = output_path.parent / f"{output_path.stem}_frame_details{output_path.suffix}"
         with open(details_path, 'w') as f:
-            json.dump({
-                'evaluation_info': {
-                    'frames_evaluated': len(frame_details),
-                    'distance_threshold_m': self.distance_threshold,
-                    'iou_threshold': self.iou_threshold
-                },
-                'frame_by_frame_results': frame_details
-            }, f, indent=2)
+            json.dump({'frame_by_frame_results': report['frame_by_frame_results']}, f, indent=2, default=str)
 
-    def save_text_report(self, output_path: str) -> None:
-        """Save human-readable text report using the comprehensive report data."""
+    def save_text_report(self, output_path: str):
+        """Save human-readable text report."""
         report = self.generate_comprehensive_report()
 
-        if 'error' in report:
-            with open(output_path, 'w') as f:
-                f.write(f"Error: {report['error']}\n")
-            return
+        output_path = Path(output_path)
 
         with open(output_path, 'w') as f:
-            self._write_report_content(f, report)
+            f.write("TRACKING EVALUATION REPORT - TABLE FORMAT\n")
+            f.write("=" * 80 + "\n\n")
 
-    def print_summary_report(self) -> None:
-        """Print formatted summary using the comprehensive report data."""
-        report = self.generate_comprehensive_report()
+            # Configuration table
+            f.write("CONFIGURATION\n")
+            f.write("-" * 50 + "\n")
+            summary = report['evaluation_summary']
+            f.write(f"{'Frames Evaluated':<30} {summary['frames_evaluated']:>10}\n")
+            f.write(f"{'Distance Threshold (m)':<30} {summary['distance_threshold_m']:>10.1f}\n")
+            f.write(f"{'Use CVPR Labels Only':<30} {str(summary['use_cvpr_labels_only']):>10}\n")
+            f.write(f"{'RA Map Filtering':<30} {'Precision Only':>10}\n")
+            f.write(f"{'Bbox Metrics Filtering':<30} {'All Labels':>10}\n\n")
 
-        if 'error' in report:
-            print(f"Error: {report['error']}")
-            return
+            # Primary metrics table
+            f.write("PRIMARY METRICS COMPARISON\n")
+            f.write("-" * 80 + "\n")
+            f.write(f"{'Metric':<20} {'Detection':<15} {'Tracking':<15} {'Improvement':<15} {'Notes':<15}\n")
+            f.write("-" * 80 + "\n")
 
-        print("\n" + "=" * 80)
-        print("           TRACKING AND DETECTION EVALUATION REPORT")
-        print("=" * 80)
+            metrics = report['primary_metrics']
+            det_precision = metrics['detection_precision']
+            track_precision = metrics['tracking_precision']
+            precision_improvement = (
+                        (track_precision - det_precision) / det_precision * 100) if det_precision > 0 else 0
 
-        self._print_report_content(report)
-        print("\n" + "=" * 80)
+            det_det_a = metrics['detection_det_a']
+            track_det_a = metrics['tracking_det_a']
+            det_a_improvement = ((track_det_a - det_det_a) / det_det_a * 100) if det_det_a > 0 else 0
 
-    def _write_report_content(self, f, report: Dict[str, Any]) -> None:
-        """Write formatted report content to file."""
-        summary = report['evaluation_summary']
-        det = report['detection_performance']
-        track = report['tracking_performance']
-        comp = report['performance_comparison']
-        camera_iou = report.get('camera_iou_performance', {})
+            det_iou = metrics['detection_iou']
+            track_iou = metrics['tracking_iou']
+            iou_improvement = ((track_iou - det_iou) / det_iou * 100) if det_iou > 0 else 0
 
-        # Header
-        f.write("═" * 100 + "\n")
-        f.write("                        TRACKING AND DETECTION EVALUATION REPORT\n")
-        f.write("═" * 100 + "\n\n")
+            camera_iou = metrics['camera_iou_mean']
 
-        # Executive Summary
-        f.write("📋 EXECUTIVE SUMMARY\n")
-        f.write("─" * 50 + "\n")
-        f.write(f"Frames: {summary['frames_evaluated']:,} | Distance Threshold: {summary['distance_threshold_m']:.1f}m | "
-                f"IoU Threshold: {summary['iou_threshold']:.2f} | Avg GT/Frame: {det['avg_ground_truth_per_frame']:.1f}\n\n")
+            f.write(
+                f"{'Precision (RA)':<20} {det_precision:<15.4f} {track_precision:<15.4f} {precision_improvement:>+13.1f}% {'Filtered' if summary['use_cvpr_labels_only'] else 'All':<15}\n")
+            f.write(
+                f"{'DetA (Camera)':<20} {det_det_a:<15.4f} {track_det_a:<15.4f} {det_a_improvement:>+13.1f}% {'All Labels':<15}\n")
+            f.write(
+                f"{'IoU (Camera)':<20} {det_iou:<15.4f} {track_iou:<15.4f} {iou_improvement:>+13.1f}% {'All Labels':<15}\n")
+            f.write(f"{'Camera IoU Mean':<20} {'-':<15} {camera_iou:<15.4f} {'-':<15} {'All Labels':<15}\n")
+            f.write(f"{'HOTA':<20} {'-':<15} {metrics['hota']:<15.4f} {'-':<15} {'All Labels':<15}\n")
+            f.write(f"{'MOTA':<20} {'-':<15} {metrics['mota']:<15.4f} {'-':<15} {'All Labels':<15}\n")
 
-        # Performance Summary Table
-        f.write("🎯 PERFORMANCE SUMMARY\n")
-        f.write("─" * 50 + "\n")
-        f.write(f"{'Metric':<25} {'Detection':<12} {'Tracking':<12} {'Improvement':<12}\n")
-        f.write("─" * 80 + "\n")
-
-        metrics_to_show = ['precision', 'recall', 'f1_score', 'det_a']
-        for metric in metrics_to_show:
-            f.write(f"{metric.replace('_', ' ').title():<25} {det[metric]:<12.4f} {track[metric]:<12.4f} "
-                   f"{comp[metric]['improvement_percent']:>+10.1f}%\n")
-
-        # Distance metrics
-        det_dist = "N/A" if det['mean_euclidean_distance'] == float('inf') else f"{det['mean_euclidean_distance']:.2f}"
-        track_dist = "N/A" if track['mean_euclidean_distance'] == float('inf') else f"{track['mean_euclidean_distance']:.2f}"
-        dist_improvement = "N/A" if comp['mean_euclidean_distance_m']['improvement_percent'] == float('inf') else f"{comp['mean_euclidean_distance_m']['improvement_percent']:+10.1f}%"
-        f.write(f"{'Mean Distance (m)':<25} {det_dist:<12} {track_dist:<12} {dist_improvement:>11}\n")
-
-        # Camera IoU
-        if camera_iou:
-            det_cam_iou = camera_iou.get('detection_camera_iou', {})
-            track_cam_iou = camera_iou.get('tracking_camera_iou', {})
-            det_cam_mean = det_cam_iou.get('mean', 0.0)
-            track_cam_mean = track_cam_iou.get('mean', 0.0)
-            cam_improvement = "N/A"
-            if det_cam_mean > 0 and track_cam_mean > 0:
-                cam_improvement = f"{((track_cam_mean - det_cam_mean) / det_cam_mean) * 100:+10.1f}%"
-            f.write(f"{'Camera IoU':<25} {det_cam_mean:<12.4f} {track_cam_mean:<12.4f} {cam_improvement:>11}\n")
-
-        f.write("\n")
-
-        # Performance Analysis
-        f.write("📊 PERFORMANCE ANALYSIS\n")
-        f.write("─" * 50 + "\n")
-        avg_improvement = (comp['precision']['improvement_percent'] +
-                          comp['recall']['improvement_percent'] +
-                          comp['f1_score']['improvement_percent']) / 3
-
-        if avg_improvement > 5:
-            assessment = "✅ TRACKING SIGNIFICANTLY IMPROVES PERFORMANCE"
-        elif avg_improvement > 1:
-            assessment = "✅ Tracking provides modest improvement"
-        elif avg_improvement > -1:
-            assessment = "⚖️ Tracking performance is comparable to detection"
-        else:
-            assessment = "⚠️ Tracking underperforms compared to detection"
-
-        f.write(f"{assessment} (Avg Improvement: {avg_improvement:+.1f}%)\n")
-        f.write("\n")
-        f.write("═" * 100 + "\n")
-
-    def _print_report_content(self, report: Dict[str, Any]) -> None:
-        """Print formatted report content to console."""
-        summary = report['evaluation_summary']
-        det = report['detection_performance']
-        track = report['tracking_performance']
-        comp = report['performance_comparison']
-
-        print(f"\n📊 EVALUATION SUMMARY:")
-        print(f"   • Frames Evaluated: {summary['frames_evaluated']}")
-        print(f"   • Distance Threshold: {summary['distance_threshold_m']:.1f}m")
-        print(f"   • IoU Threshold: {summary['iou_threshold']:.2f}")
-
-        print(f"\n🎯 DETECTION PERFORMANCE:")
-        print(f"   • Precision: {det['precision']:.3f} | Recall: {det['recall']:.3f} | F1: {det['f1_score']:.3f}")
-        print(f"   • DetA: {det['det_a']:.3f} | Mean Distance: {det['mean_euclidean_distance']:.2f}m")
-        print(f"   • TP/FP/FN: {det['true_positives']}/{det['false_positives']}/{det['false_negatives']}")
-
-        print(f"\n🔄 TRACKING PERFORMANCE:")
-        print(f"   • Precision: {track['precision']:.3f} | Recall: {track['recall']:.3f} | F1: {track['f1_score']:.3f}")
-        print(f"   • DetA: {track['det_a']:.3f} | Mean Distance: {track['mean_euclidean_distance']:.2f}m")
-        print(f"   • TP/FP/FN: {track['true_positives']}/{track['false_positives']}/{track['false_negatives']}")
-
-        print(f"\n📈 IMPROVEMENTS (Tracking vs Detection):")
-        print(f"   • Precision: {comp['precision']['improvement_percent']:+.1f}% | "
-              f"Recall: {comp['recall']['improvement_percent']:+.1f}% | "
-              f"F1: {comp['f1_score']['improvement_percent']:+.1f}%")
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("LEGEND:\n")
+            f.write("- Detection: Raw network predictions vs ground truth\n")
+            f.write("- Tracking: Track outputs vs ground truth\n")
+            f.write("- RA: Range-Azimuth based (uses distance threshold)\n")
+            f.write("- Camera: Camera image IoU based (uses bounding boxes)\n")
+            f.write("- Filtered: Only CVPR labels (cvpr_updated=True)\n")
+            f.write("- All Labels: All labels regardless of cvpr_updated flag\n")
 
 
 def evaluate_tracking_sequence(predictions_csv: str, ground_truth_csv: str,
-                               tracking_csv: str, output_dir: str,
-                               distance_threshold: float = 5.0,
-                               iou_threshold: float = 0.3,
-                               max_frames: Optional[int] = None,
-                               skip_initial_frames: int = 3,
-                               max_frame_gap_time: float = 5.0,
-                               use_camera_fov_filter: bool = True) -> Tuple[Path, Dict[str, Any]]:
-    """Evaluate complete tracking sequence and save both JSON and text reports.
-    
-    Args:
-        predictions_csv: Path to predictions CSV file
-        ground_truth_csv: Path to ground truth CSV file  
-        tracking_csv: Path to tracking results CSV file
-        output_dir: Directory to save evaluation results
-        distance_threshold: Distance threshold for valid associations
-        iou_threshold: IoU threshold for evaluation
-        max_frames: Maximum number of frames to evaluate
-        skip_initial_frames: Number of initial frames to skip from metrics
-        max_frame_gap_time: Maximum time gap (seconds) before tracks are cleared
-        use_camera_fov_filter: Filter detections/tracks to camera FOV during evaluation
-    """
+                             tracking_csv: str, output_dir: str,
+                             distance_threshold: float = 5.0,
+                             use_cvpr_labels_only: bool = True,
+                             **kwargs) -> Tuple[Path, Dict[str, Any]]:
+    """Evaluate tracking sequence with HOTA, MOTA, IoU, DetA, and Precision metrics."""
+
     evaluator = TrackingDetectionEvaluator(
         distance_threshold=distance_threshold,
-        iou_threshold=iou_threshold,
-        use_camera_fov_filter=use_camera_fov_filter,
+        use_cvpr_labels_only=use_cvpr_labels_only
     )
 
     # Load data
@@ -582,81 +459,20 @@ def evaluate_tracking_sequence(predictions_csv: str, ground_truth_csv: str,
     ground_truth_df = pd.read_csv(ground_truth_csv, sep='\t|,', engine='python')
     tracking_df = pd.read_csv(tracking_csv)
 
-    # Get frames with ground truth
-    gt_frames = set(ground_truth_df['numSample'].unique())
-    frame_ids = sorted(gt_frames)
+    # Get unique frames
+    gt_frames = sorted(ground_truth_df['numSample'].unique())
 
-    # Skip initial frames
-    if skip_initial_frames > 0 and len(frame_ids) > skip_initial_frames:
-        skipped_frames = frame_ids[:skip_initial_frames]
-        frame_ids = frame_ids[skip_initial_frames:]
-        print(f"Skipping first {skip_initial_frames} frames from metrics: {skipped_frames}")
+    # Evaluate each frame
+    for frame_id in gt_frames:
+        pred_frame = predictions_df[predictions_df['sample_id'] == frame_id]
+        gt_frame = ground_truth_df[ground_truth_df['numSample'] == frame_id]
+        track_frame = tracking_df[tracking_df['sample_id'] == frame_id]
 
-    if max_frames:
-        frame_ids = frame_ids[:max_frames]
-
-    # Identify frames to skip after time gaps
-    frames_to_skip = set()
-    if 'time_gap' in tracking_df.columns:
-        # Find frames that follow large time gaps
-        large_gap_frames = tracking_df[tracking_df['time_gap'] > max_frame_gap_time]['sample_id'].unique()
-        
-        # For each frame after a large gap, skip the next min_hits frames
-        for gap_frame in large_gap_frames:
-            # Find the position of this frame in our evaluation frame list
-            try:
-                gap_idx = frame_ids.index(gap_frame)
-                # Skip the next min_hits frames after the gap
-                for i in range(skip_initial_frames):
-                    if gap_idx + i < len(frame_ids):
-                        frames_to_skip.add(frame_ids[gap_idx + i])
-            except ValueError:
-                # Gap frame not in our evaluation list, skip
-                continue
-        
-        if frames_to_skip:
-            print(f"Skipping {len(frames_to_skip)} frames after large time gaps (>{max_frame_gap_time:.1f}s): {sorted(frames_to_skip)}")
-    else:
-        print(" the column 'time_gap' in tracking_df.columns is missing, check the tracking csv output")
-    # Evaluate each frame (excluding skipped frames)
-    evaluated_frames = []
-    for frame_id in frame_ids:
-        if frame_id not in frames_to_skip:
-            pred_frame = predictions_df[predictions_df['sample_id'] == frame_id]
-            gt_frame = ground_truth_df[ground_truth_df['numSample'] == frame_id]
-            track_frame = tracking_df[tracking_df['sample_id'] == frame_id]
-            evaluator.evaluate_frame(pred_frame, gt_frame, track_frame, frame_id)
-            evaluated_frames.append(frame_id)
-
-    print(f"Evaluated {len(evaluated_frames)} frames (skipped {len(frame_ids) - len(evaluated_frames)} frames total)")
+        evaluator.evaluate_frame(pred_frame, gt_frame, track_frame, frame_id)
 
     # Save reports
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    # Save JSON report for aggregation
-    evaluator.save_json_report(str(output_path / 'evaluation_metrics.json'))
-
-    # Save text report for human reading
-    evaluator.save_text_report(str(output_path / 'evaluation_summary.txt'))
+    output_path = Path(output_dir) / 'evaluation_metrics.json'
+    evaluator.save_reports(str(output_path))
+    evaluator.save_text_report(str(Path(output_dir) / 'evaluation_summary.txt'))
 
     return output_path, evaluator.generate_comprehensive_report()
-
-
-if __name__ == "__main__":
-    # Example usage
-    predictions_csv = "predictions.csv"
-    ground_truth_csv = "ground_truth.csv"
-    tracking_csv = "tracking_results.csv"
-    output_dir = "evaluation_results"
-
-    output_path, report = evaluate_tracking_sequence(
-        predictions_csv=predictions_csv,
-        ground_truth_csv=ground_truth_csv,
-        tracking_csv=tracking_csv,
-        output_dir=output_dir,
-        distance_threshold=5.0,
-        iou_threshold=0.3
-    )
-
-    print(f"Reports saved to: {output_path}")
