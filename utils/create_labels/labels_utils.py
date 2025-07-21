@@ -155,9 +155,11 @@ def merge_cvpr_labels(base_dir, labels_path, root_folder, iou_threshold=0.3):
     # Read existing labels.csv
     existing_labels_path = os.path.join(base_dir, 'labels.csv')
     existing_df = pd.read_csv(existing_labels_path)
+    dataset_name = existing_df['dataset'].unique().item()
 
     # Read CVPR labels
     cvpr_df = pd.read_csv(labels_path)
+    cvpr_df = cvpr_df[cvpr_df['dataset'] == dataset_name]
 
     # Initialize SyncReader to get timestamps
     db = SyncReader(root_folder, master='radar', tolerance=20000, silent=True, camera_only=False)
@@ -171,35 +173,22 @@ def merge_cvpr_labels(base_dir, labels_path, root_folder, iou_threshold=0.3):
     cvpr_timestamps = {}
 
     # Get timestamps for CVPR samples
-    for idx, row in cvpr_df.iterrows():
+    for _, row in cvpr_df.iterrows():
+        idx = row['index']
         try:
             # Extract frame index from CVPR data (assuming it has a frame/sample identifier)
-            if 'numSample' in cvpr_df.columns:
-                frame_idx = int(row['numSample'])
-            elif 'index' in cvpr_df.columns:
-                frame_idx = int(row['index'])
-            else:
-                # Try to extract from filename if available
-                if 'filename' in cvpr_df.columns:
-                    import re
-                    match = re.search(r'(\d+)', str(row['filename']))
-                    if match:
-                        frame_idx = int(match.group(1))
-                    else:
-                        continue
-                else:
-                    continue
+            frame_idx = int(row['numSample'])
 
             # Get timestamp for this frame
-            if frame_idx < len(db):
-                sample = db.GetSensorData(frame_idx)
+            if idx < len(db):
+                sample = db.GetSensorData(idx)
                 timestamp = sample['radar_ch1']['timestamp']
 
                 if timestamp not in cvpr_timestamps:
                     cvpr_timestamps[timestamp] = []
 
                 cvpr_timestamps[timestamp].append({
-                    'cvpr_idx': idx,
+                    'cvpr_frame_idx': frame_idx,
                     'x1_pix': row.get('x1_pix', 0),
                     'y1_pix': row.get('y1_pix', 0),
                     'x2_pix': row.get('x2_pix', 0),
@@ -213,7 +202,7 @@ def merge_cvpr_labels(base_dir, labels_path, root_folder, iou_threshold=0.3):
                 })
 
         except Exception as e:
-            print(f"Error processing CVPR row {idx}: {e}")
+            print(f"Error processing CVPR row index {idx}: {e}")
             continue
 
     # Process existing labels and match with CVPR
