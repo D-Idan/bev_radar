@@ -32,8 +32,9 @@ class ConfigurationComparisonAnalyzer:
         self.key_metrics = key_metrics or [
             'hota', 'mota', 'precision', 'det_a'
         ]
-        self.distance_metrics = ['mean_euclidean_distance', 'motp']
+        self.distance_metrics = ['mean_euclidean_distance', 'motp', 'ncle']
         self.iou_metrics = ['camera_iou_mean']
+        self.count_metrics = ['tp', 'fp']
 
     def compare_configurations(self, dataset_name: str, config_results: Dict[str, bool],
                                dataset_root: Path, baseline_config: str = 'raw_predictions') -> ConfigurationComparison:

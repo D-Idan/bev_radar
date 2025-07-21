@@ -39,8 +39,8 @@ class PoorPerformanceAnalyzer:
         """
         self.metric_name = metric_name
         self.top_k = top_k
-        self.distance_metrics = []
-        self.primary_metrics = ['hota', 'mota', 'det_a', 'precision', 'tracking_iou', 'camera_iou_mean']
+        self.distance_metrics = ['ncle']
+        self.primary_metrics = ['hota', 'mota', 'det_a', 'precision', 'tracking_iou', 'camera_iou_mean', 'ncle', 'tp', 'fp']
 
     def analyze_poor_performance_frames(self, evaluation_details_path: Path, output_dir: Path) -> List[
         PoorPerformanceFrame]:

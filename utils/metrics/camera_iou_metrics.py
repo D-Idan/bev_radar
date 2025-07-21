@@ -150,6 +150,62 @@ class CameraIoUCalculator:
 
         return inter_area / union_area
 
+    def calculate_bbox_center(self, bbox: Tuple[int, int, int, int]) -> Tuple[float, float]:
+        """
+        Calculate center point of a bounding box.
+
+        Args:
+            bbox: (x_min, y_min, x_max, y_max)
+
+        Returns:
+            (center_x, center_y)
+        """
+        x_min, y_min, x_max, y_max = bbox
+        center_x = (x_min + x_max) / 2.0
+        center_y = (y_min + y_max) / 2.0
+        return center_x, center_y
+
+    def calculate_cle(self, bbox1: Tuple[int, int, int, int],
+                      bbox2: Tuple[int, int, int, int]) -> float:
+        """
+        Calculate Center Location Error between two bounding boxes.
+
+        Args:
+            bbox1: Predicted bounding box (x_min, y_min, x_max, y_max)
+            bbox2: Ground truth bounding box (x_min, y_min, x_max, y_max)
+
+        Returns:
+            CLE in pixels
+        """
+        center1 = self.calculate_bbox_center(bbox1)
+        center2 = self.calculate_bbox_center(bbox2)
+
+        cle = np.sqrt((center1[0] - center2[0]) ** 2 + (center1[1] - center2[1]) ** 2)
+        return cle
+
+    def calculate_ncle(self, bbox1: Tuple[int, int, int, int],
+                       bbox2: Tuple[int, int, int, int],
+                       image_shape: Tuple[int, int]) -> float:
+        """
+        Calculate Normalized Center Location Error.
+
+        Args:
+            bbox1: Predicted bounding box
+            bbox2: Ground truth bounding box
+            image_shape: (height, width) of image
+
+        Returns:
+            NCLE normalized by image diagonal
+        """
+        cle = self.calculate_cle(bbox1, bbox2)
+
+        # Normalize by image diagonal
+        height, width = image_shape
+        image_diagonal = np.sqrt(height ** 2 + width ** 2)
+
+        ncle = cle / image_diagonal if image_diagonal > 0 else 0.0
+        return ncle
+
     def evaluate_camera_iou_single_frame(self, predictions_df: pd.DataFrame,
                                          labels_df: pd.DataFrame,
                                          tracking_df: Optional[pd.DataFrame] = None,
@@ -178,6 +234,12 @@ class CameraIoUCalculator:
         results = {
             'detection_vs_labels_ious': [],
             'tracking_vs_labels_ious': [] if tracking_df is not None else None,
+            'detection_ncles': [],
+            'tracking_ncles': [] if tracking_df is not None else None,
+            'detection_tp': 0,
+            'detection_fp': 0,
+            'tracking_tp': 0 if tracking_df is not None else None,
+            'tracking_fp': 0 if tracking_df is not None else None,
             'sample_id': sample_id,
             'debug_info': {
                 'num_predictions': len(predictions_df),
@@ -192,6 +254,10 @@ class CameraIoUCalculator:
             bbox = self.get_label_bbox_consistent(label_row, image_shape)
             label_bboxes.append(bbox)
 
+        # Track which labels have been matched for TP/FP calculation
+        detection_matched_labels = set()
+        tracking_matched_labels = set()
+
         # Evaluate detection predictions vs labels
         for _, pred_row in predictions_df.iterrows():
             pred_bbox = self.range_azimuth_to_camera_bbox_consistent(
@@ -200,11 +266,34 @@ class CameraIoUCalculator:
 
             # Calculate IoU with all labels and take maximum
             max_iou = 0.0
-            for label_bbox in label_bboxes:
+            best_match_idx = -1
+            min_ncle = float('inf')
+
+            for idx, label_bbox in enumerate(label_bboxes):
                 iou = self.calculate_bbox_iou(pred_bbox, label_bbox)
-                max_iou = max(max_iou, iou)
+                if iou > max_iou:
+                    max_iou = iou
+                    best_match_idx = idx
+
+                # Calculate NCLE for best match
+                if iou >= self.iou_threshold:
+                    ncle = self.calculate_ncle(pred_bbox, label_bbox, image_shape)
+                    min_ncle = min(min_ncle, ncle)
 
             results['detection_vs_labels_ious'].append(max_iou)
+
+            # Add NCLE (use 1.0 if no match above threshold)
+            if min_ncle < float('inf'):
+                results['detection_ncles'].append(min_ncle)
+            else:
+                results['detection_ncles'].append(1.0)  # Max normalized error
+
+            # Count TP/FP
+            if max_iou >= self.iou_threshold and best_match_idx >= 0:
+                results['detection_tp'] += 1
+                detection_matched_labels.add(best_match_idx)
+            else:
+                results['detection_fp'] += 1
 
         # Evaluate tracking predictions vs labels (if available)
         if tracking_df is not None and not tracking_df.empty:
@@ -215,11 +304,34 @@ class CameraIoUCalculator:
 
                 # Calculate IoU with all labels and take maximum
                 max_iou = 0.0
-                for label_bbox in label_bboxes:
+                best_match_idx = -1
+                min_ncle = float('inf')
+
+                for idx, label_bbox in enumerate(label_bboxes):
                     iou = self.calculate_bbox_iou(track_bbox, label_bbox)
-                    max_iou = max(max_iou, iou)
+                    if iou > max_iou:
+                        max_iou = iou
+                        best_match_idx = idx
+
+                    # Calculate NCLE for best match
+                    if iou >= self.iou_threshold:
+                        ncle = self.calculate_ncle(track_bbox, label_bbox, image_shape)
+                        min_ncle = min(min_ncle, ncle)
 
                 results['tracking_vs_labels_ious'].append(max_iou)
+
+                # Add NCLE
+                if min_ncle < float('inf'):
+                    results['tracking_ncles'].append(min_ncle)
+                else:
+                    results['tracking_ncles'].append(1.0)
+
+                # Count TP/FP
+                if max_iou >= self.iou_threshold and best_match_idx >= 0:
+                    results['tracking_tp'] += 1
+                    tracking_matched_labels.add(best_match_idx)
+                else:
+                    results['tracking_fp'] += 1
 
         return results
 

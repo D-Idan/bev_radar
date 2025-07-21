@@ -52,7 +52,7 @@ class TrackingDetectionEvaluator:
         self.frame_results = []
 
     def evaluate_frame(self, predictions: pd.DataFrame, ground_truth: pd.DataFrame,
-                      tracks: pd.DataFrame, frame_id: int) -> Dict[str, Any]:
+                       tracks: pd.DataFrame, frame_id: int) -> Dict[str, Any]:
         """Evaluate single frame."""
 
         # For precision calculations (using range-azimuth maps), filter if needed
@@ -121,7 +121,12 @@ class TrackingDetectionEvaluator:
         # Override the placeholder values in frame_metrics with camera-based calculations
         frame_metrics.update({
             'detection_det_a': camera_det_a['detection_det_a'],
-            'tracking_det_a': camera_det_a['tracking_det_a']
+            'tracking_det_a': camera_det_a['tracking_det_a'],
+            # Add new metrics
+            'detection_tp': camera_iou_result.get('detection_tp', 0),
+            'detection_fp': camera_iou_result.get('detection_fp', 0),
+            'tracking_tp': camera_iou_result.get('tracking_tp', 0),
+            'tracking_fp': camera_iou_result.get('tracking_fp', 0),
         })
 
         frame_result = {
@@ -291,7 +296,13 @@ class TrackingDetectionEvaluator:
                 'detection_det_a': detection_metrics['det_a'],
                 'tracking_precision': tracking_metrics['precision'],
                 'tracking_det_a': tracking_metrics['det_a'],
-                'camera_iou_mean': camera_iou_summary['tracking_camera_iou']['mean']
+                'camera_iou_mean': camera_iou_summary['tracking_camera_iou']['mean'],
+                'detection_ncle': camera_iou_summary['detection_ncle']['mean'],
+                'tracking_ncle': camera_iou_summary['tracking_ncle']['mean'],
+                'detection_tp': camera_iou_summary['detection_tp_fp']['true_positives'],
+                'detection_fp': camera_iou_summary['detection_tp_fp']['false_positives'],
+                'tracking_tp': camera_iou_summary['tracking_tp_fp']['true_positives'],
+                'tracking_fp': camera_iou_summary['tracking_tp_fp']['false_positives']
             },
             'detailed_tracking_metrics': {
                 'motp': float(summary['motp'].values[0]) if not np.isnan(summary['motp'].values[0]) else None,
@@ -343,12 +354,28 @@ class TrackingDetectionEvaluator:
         """Calculate camera IoU summary statistics."""
         all_detection_ious = []
         all_tracking_ious = []
+        all_detection_ncles = []
+        all_tracking_ncles = []
+        total_detection_tp = 0
+        total_detection_fp = 0
+        total_tracking_tp = 0
+        total_tracking_fp = 0
 
         for result in self.frame_results:
             camera_result = result['camera_iou_results']
             all_detection_ious.extend(camera_result.get('detection_vs_labels_ious', []))
+            all_detection_ncles.extend(camera_result.get('detection_ncles', []))
+
             if camera_result.get('tracking_vs_labels_ious'):
                 all_tracking_ious.extend(camera_result['tracking_vs_labels_ious'])
+                all_tracking_ncles.extend(camera_result.get('tracking_ncles', []))
+
+            # Accumulate TP/FP
+            total_detection_tp += camera_result.get('detection_tp', 0)
+            total_detection_fp += camera_result.get('detection_fp', 0)
+            if camera_result.get('tracking_tp') is not None:
+                total_tracking_tp += camera_result.get('tracking_tp', 0)
+                total_tracking_fp += camera_result.get('tracking_fp', 0)
 
         return {
             'detection_camera_iou': {
@@ -358,6 +385,26 @@ class TrackingDetectionEvaluator:
             'tracking_camera_iou': {
                 'mean': float(np.mean(all_tracking_ious)) if all_tracking_ious else 0.0,
                 'count': len(all_tracking_ious)
+            },
+            'detection_ncle': {
+                'mean': float(np.mean(all_detection_ncles)) if all_detection_ncles else 0.0,
+                'std': float(np.std(all_detection_ncles)) if all_detection_ncles else 0.0,
+                'count': len(all_detection_ncles)
+            },
+            'tracking_ncle': {
+                'mean': float(np.mean(all_tracking_ncles)) if all_tracking_ncles else 0.0,
+                'std': float(np.std(all_tracking_ncles)) if all_tracking_ncles else 0.0,
+                'count': len(all_tracking_ncles)
+            },
+            'detection_tp_fp': {
+                'true_positives': total_detection_tp,
+                'false_positives': total_detection_fp,
+                'total': total_detection_tp + total_detection_fp
+            },
+            'tracking_tp_fp': {
+                'true_positives': total_tracking_tp,
+                'false_positives': total_tracking_fp,
+                'total': total_tracking_tp + total_tracking_fp
             }
         }
 
@@ -424,6 +471,12 @@ class TrackingDetectionEvaluator:
             f.write(f"{'Camera IoU Mean':<20} {'-':<15} {camera_iou:<15.4f} {'-':<15} {'All Labels':<15}\n")
             f.write(f"{'HOTA':<20} {'-':<15} {metrics['hota']:<15.4f} {'-':<15} {'All Labels':<15}\n")
             f.write(f"{'MOTA':<20} {'-':<15} {metrics['mota']:<15.4f} {'-':<15} {'All Labels':<15}\n")
+            f.write(
+                f"{'NCLE':<20} {metrics['detection_ncle']:<15.4f} {metrics['tracking_ncle']:<15.4f} {'-':<15} {'All Labels':<15}\n")
+            f.write(
+                f"{'True Positives':<20} {metrics['detection_tp']:<15d} {metrics['tracking_tp']:<15d} {'-':<15} {'All Labels':<15}\n")
+            f.write(
+                f"{'False Positives':<20} {metrics['detection_fp']:<15d} {metrics['tracking_fp']:<15d} {'-':<15} {'All Labels':<15}\n")
 
             f.write("\n" + "=" * 80 + "\n")
             f.write("LEGEND:\n")
