@@ -84,7 +84,11 @@ def bbox_iou(box1, boxes):
         inter_area = rect_1.intersection(rect_2).area
 
         # compute IoU of the two bounding boxes
-        iou = inter_area / (area_1 + area_2 - inter_area)
+        union_area = area_1 + area_2 - inter_area
+        if union_area == 0:
+            iou = np.zeros(1)
+        else:
+            iou = inter_area / union_area
 
         ious[box_id] = iou
 

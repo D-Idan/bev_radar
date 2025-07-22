@@ -46,7 +46,8 @@ class TrackingDetectionEvaluator:
         self.hota_data = {
             'gt_ids_per_frame': {},
             'pred_ids_per_frame': {},
-            'similarity_scores': {}
+            'similarity_scores': {},
+            'iou_distances': {}  # Store IoU-based distances for consistency
         }
 
         self.frame_results = []
@@ -72,23 +73,47 @@ class TrackingDetectionEvaluator:
 
         # Get IDs - use all labels for tracking metrics
         if 'ID' in gt_all.columns:
-            gt_ids = gt_all['ID'].values.astype(int)
+            # Filter out any NaN or invalid IDs
+            valid_gt = gt_all[gt_all['ID'].notna()]
+            gt_ids = valid_gt['ID'].values.astype(int)
+            gt_all = valid_gt  # Update gt_all to only include valid IDs
         else:
             gt_ids = np.arange(len(gt_all))
 
-        track_ids = tracks['track_id'].values.astype(int) if 'track_id' in tracks.columns else np.arange(len(tracks))
+        # Ensure we have valid track IDs
+        if 'track_id' in tracks.columns:
+            track_ids = tracks['track_id'].values.astype(int)
+        else:
+            track_ids = np.arange(len(tracks))
 
         # Calculate distance matrix for MOTA (using all labels)
-        if len(track_positions) > 0 and len(gt_positions_all) > 0:
-            distances = cdist(track_positions, gt_positions_all)
+        # IMPORTANT: For camera-based tracking, use IoU distance (1 - IoU) instead of Euclidean
+        if len(tracks) > 0 and len(gt_all) > 0:
+            # Build IoU-based distance matrix
+            distances = np.ones((len(tracks), len(gt_all))) * np.inf
+
+            for i, (track_idx, track_row) in enumerate(tracks.iterrows()):
+                track_bbox = self.camera_iou_calculator.range_azimuth_to_camera_bbox_consistent(
+                    track_row['range_m'], track_row['azimuth_deg'], (540, 960)
+                )
+
+                for j, (_, gt_row) in enumerate(gt_all.iterrows()):
+                    gt_bbox = self.camera_iou_calculator.get_label_bbox_consistent(gt_row, (540, 960))
+                    iou = self.camera_iou_calculator.calculate_bbox_iou(track_bbox, gt_bbox)
+
+                    # Convert IoU to distance (1 - IoU)
+                    distances[i, j] = 1.0 - iou
+
+            # Apply threshold - for IoU distance, threshold should be (1 - min_iou)
+            filtered_distances = distances.copy()
+            iou_distance_threshold = 1.0 - self.iou_threshold  # e.g., 0.8 for 0.2 IoU threshold
+            filtered_distances[filtered_distances > iou_distance_threshold] = np.nan
+
+            # Ensure we're using the same ground truth for all metrics
+            # Store the IoU-based matches for consistency
+            self.hota_data['iou_distances'][frame_id] = distances
         else:
             distances = np.empty((0, 0))
-
-        # Apply distance threshold for motmetrics
-        if len(track_positions) > 0 and len(gt_positions_all) > 0:
-            filtered_distances = distances.copy()
-            filtered_distances[filtered_distances > self.distance_threshold] = np.nan
-        else:
             filtered_distances = distances
 
         # Update motmetrics accumulator for MOTA (using all labels)
@@ -235,34 +260,39 @@ class TrackingDetectionEvaluator:
 
     def _calculate_hota(self) -> float:
         """Calculate HOTA (Higher Order Tracking Accuracy) metric."""
-        # Simplified HOTA calculation
-        # Full HOTA requires complex association calculation across all frames
-        # This is a simplified version focusing on detection and association accuracy
+        # Calculate proper association accuracy from MOTA components
+        summary = mm.metrics.create().compute(self.acc, metrics=['num_matches', 'num_false_positives',
+                                                                 'num_misses', 'num_switches'], name='acc')
 
+        num_matches = float(summary['num_matches'].values[0])
+        num_fp = float(summary['num_false_positives'].values[0])
+        num_fn = float(summary['num_misses'].values[0])
+        num_switches = float(summary['num_switches'].values[0])
+
+        # Calculate detection accuracy (DetA)
         total_det_a = 0
-        total_ass_a = 0
-        valid_frames = 0
+        total_gt = 0
 
         for frame in self.frame_results:
             metrics = frame['metrics']
-            # Use tracking DetA as proxy for detection accuracy
             det_a_value = metrics.get('tracking_det_a', 0)
-            # Use tracking precision as proxy for association accuracy
-            ass_a_value = metrics.get('tracking_precision', 0)
+            num_gt = frame.get('num_ground_truth_total', 0)
 
-            # Only count frames with valid metrics
-            if det_a_value > 0 or ass_a_value > 0:
-                total_det_a += det_a_value
-                total_ass_a += ass_a_value
-                valid_frames += 1
+            if num_gt > 0:
+                total_det_a += det_a_value * num_gt
+                total_gt += num_gt
 
-        if valid_frames > 0:
-            avg_det_a = total_det_a / valid_frames
-            avg_ass_a = total_ass_a / valid_frames
-            # HOTA is geometric mean of detection and association accuracy
-            hota = np.sqrt(avg_det_a * avg_ass_a) if avg_det_a > 0 and avg_ass_a > 0 else 0.0
+        avg_det_a = total_det_a / total_gt if total_gt > 0 else 0.0
+
+        # Calculate association accuracy (AssA)
+        # AssA = TP / (TP + FN + IDSW) where TP = num_matches
+        if num_matches > 0:
+            ass_a = num_matches / (num_matches + num_fn + num_switches)
         else:
-            hota = 0.0
+            ass_a = 0.0
+
+        # HOTA is geometric mean of detection and association accuracy
+        hota = np.sqrt(avg_det_a * ass_a) if avg_det_a > 0 and ass_a > 0 else 0.0
 
         return hota
 

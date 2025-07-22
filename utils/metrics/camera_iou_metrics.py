@@ -297,7 +297,7 @@ class CameraIoUCalculator:
 
         # Evaluate tracking predictions vs labels (if available)
         if tracking_df is not None and not tracking_df.empty:
-            for _, track_row in tracking_df.iterrows():
+            for track_idx, track_row in tracking_df.iterrows():
                 track_bbox = self.range_azimuth_to_camera_bbox_consistent(
                     track_row['range_m'], track_row['azimuth_deg'], image_shape
                 )

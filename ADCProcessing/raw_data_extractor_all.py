@@ -2,6 +2,7 @@ import os
 import json
 import argparse
 import time
+import traceback
 from pathlib import Path
 
 import cv2
@@ -254,6 +255,8 @@ def extract_all(config):
             print(f"CVPR labels file not found at {labels_cvpr_path}")
     except Exception as e:
         print(f"Error during CVPR labels merge: {e}")
+        print("Detailed traceback:")
+        traceback.print_exc()  # Prints the full stack trace
         print("Continuing without CVPR labels...")
 
 if __name__ == '__main__':

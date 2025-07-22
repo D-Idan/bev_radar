@@ -212,8 +212,9 @@ def merge_cvpr_labels(base_dir, labels_path, root_folder, iou_threshold=0.3):
     for idx, row in existing_df.iterrows():
         timestamp = row['timestamp_us']
 
-        # Skip rows without bounding box data
-        if pd.isna(row['x1_pix']) or pd.isna(row['y1_pix']):
+        # Skip rows without bounding box data or with invalid coordinates
+        if (pd.isna(row['x1_pix']) or pd.isna(row['y1_pix']) or
+                pd.isna(row['x2_pix']) or pd.isna(row['y2_pix'])):
             continue
 
         # Check if we have CVPR data for this timestamp
@@ -232,6 +233,10 @@ def merge_cvpr_labels(base_dir, labels_path, root_folder, iou_threshold=0.3):
                 [row['x1_pix'], row['y2_pix']]  # bottom-left
             ]).flatten()
 
+            # Skip if bounding box has zero area
+            if (row['x1_pix'] == row['x2_pix']) or (row['y1_pix'] == row['y2_pix']):
+                continue
+
             for cvpr_det in cvpr_detections:
                 # CVPR bounding box
                 cvpr_bbox = np.array([
@@ -240,6 +245,10 @@ def merge_cvpr_labels(base_dir, labels_path, root_folder, iou_threshold=0.3):
                     [cvpr_det['x2_pix'], cvpr_det['y2_pix']],  # bottom-right
                     [cvpr_det['x1_pix'], cvpr_det['y2_pix']]  # bottom-left
                 ]).flatten()
+
+                # Skip CVPR detection if it has zero area
+                if (cvpr_det['x1_pix'] == cvpr_det['x2_pix']) or (cvpr_det['y1_pix'] == cvpr_det['y2_pix']):
+                    continue
 
                 # Calculate IoU using existing function
                 iou = bbox_iou(curr_bbox, cvpr_bbox.reshape(1, -1))[0]
