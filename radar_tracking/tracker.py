@@ -226,6 +226,7 @@ class RadarTracker:
             track.nearest_detection_distance = None
 
         # Update matched tracks
+        associated_detections_by_track_id = {} # Initialize mapping from track_id to detection
         tentative_associations = [] # Store information about tentative track associations
         for track_idx, det_idx, distance in matches:
             track = self.tracks[track_idx]
@@ -233,6 +234,9 @@ class RadarTracker:
             track = self._update_track(track, high_conf_detections[det_idx],
                                        dt=frame_dt, association_distance=distance)
             self.tracks[track_idx] = track
+
+            # Store in mapping by track ID
+            associated_detections_by_track_id[track.id] = high_conf_detections[det_idx]
 
             if track.hits < self.min_hits:  # This is a tentative track
                 tentative_associations.append({
@@ -245,6 +249,8 @@ class RadarTracker:
 
         # Store in last_frame_info for visualization
         self.last_frame_info['tentative_associations'] = tentative_associations
+        # Store the mapping in last_frame_info
+        self.last_frame_info['associated_detections_by_track_id'] = associated_detections_by_track_id
 
 
         # Handle unmatched tracks

@@ -347,13 +347,31 @@ def offline_tracking(
         avg_confidence_per_frame.append(avg_conf)
 
         # d) Record one row per active track
+        frame_info = manager.tracker.last_frame_info
         for track in active_tracks:
-            # Last detection from this track
-            last_det = track.last_detection
-            if last_det is None:
-                continue
+            # Get associated detection for this frame if exists
+            current_det = frame_info['associated_detections_by_track_id'].get(track.id,None)
 
-            # Get association distance and strategy
+            # Use current detection if available, otherwise use track state only
+            if current_det:
+                # Track has an associated detection this frame
+                det_id = getattr(current_det, '_detection_id', -1)
+                det_conf = float(current_det.confidence)
+                det_range = float(current_det.range_m)
+                det_azimuth_deg = float(np.degrees(current_det.azimuth_rad))
+            else:
+                # No detection this frame - use placeholder values
+                det_id = -1
+                det_conf = np.nan
+                det_range = np.nan
+                det_azimuth_deg = np.nan
+
+            # Always use Kalman filter state for track position
+            track_range, track_azimuth_rad = track.kalman_polar_position
+            track_range_m = float(track_range)
+            track_azimuth_deg = float(np.degrees(track_azimuth_rad))
+
+            # Get association info
             association_distance = getattr(track, 'last_association_distance', np.nan)
             association_strategy = getattr(track, 'last_association_strategy', 'unknown')
 
@@ -364,30 +382,27 @@ def offline_tracking(
             elif association_strategy in ['confidence_weighted', 'hybrid_score']:
                 distance_type = 'weighted_euclidean'
 
-            rid = getattr(last_det, '_detection_id', -1)
-            r = float(last_det.range_m)
-            az = float(np.degrees(last_det.azimuth_rad))
-            conf = float(last_det.confidence)
-
             row = {
                 'sample_id': int(frame_id),
                 'frame_id': int(frame_id),
                 'track_id': int(track.id),
-                'detection_id': int(rid),
-                'confidence': conf,
-                'range_m': r,
-                'azimuth_deg': az,
+                'detection_id': int(det_id),
+                'detection_confidence': det_conf,
+                'detection_range_m': det_range,
+                'detection_azimuth_deg': det_azimuth_deg,
+                'range_m': track_range_m,
+                'azimuth_deg': track_azimuth_deg,
+                'confidence': float(track.confidence),
                 'track_age': int(track.age),
                 'hits': int(track.hits),
                 'track_state': track.state.name if hasattr(track.state, 'name') else str(track.state),
                 'timestamp': timestamp_s,
                 'time_gap': gap if prev_timestamp else 0.0,
-
                 'association_distance': float(association_distance) if not np.isnan(association_distance) else np.nan,
                 'distance_type': distance_type,
                 'association_strategy': association_strategy,
-
-                # x1..y4 left as NaN placeholders; replace if you have pixel‐corner data
+                'has_detection_this_frame': current_det is not None,
+                # x1..y4 left as NaN placeholders
                 'x1': np.nan, 'y1': np.nan,
                 'x2': np.nan, 'y2': np.nan,
                 'x3': np.nan, 'y3': np.nan,
@@ -412,8 +427,9 @@ def offline_tracking(
     track_df = pd.DataFrame(tracking_rows)
     cols = [
         'sample_id', 'frame_id', 'timestamp', 'time_gap', 'track_id',
-        'detection_id', 'confidence', 'range_m', 'azimuth_deg',
-        'track_age', 'hits', 'track_state',
+        'detection_id', 'detection_confidence', 'detection_range_m', 'detection_azimuth_deg',
+        'range_m', 'azimuth_deg', 'confidence',
+        'track_age', 'hits', 'track_state', 'has_detection_this_frame',
         'association_distance', 'distance_type', 'association_strategy',
         'x1', 'y1', 'x2', 'y2', 'x3', 'y3', 'x4', 'y4'
     ]
