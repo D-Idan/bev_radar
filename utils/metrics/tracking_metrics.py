@@ -202,7 +202,7 @@ class TrackingDetectionEvaluator:
         """Calculate Precision (RA), DetA, and IoU (camera) for the frame.
 
         IMPORTANT:
-        - Precision uses gt_pos_ra (may be filtered by use_cvpr_labels_only for RA maps)
+        - Precision = average distance to matched ground truth in meters (filtered by use_cvpr_labels_only)
         - DetA & IoU always use ALL labels regardless of use_cvpr_labels_only flag
 
         Args:
@@ -219,29 +219,33 @@ class TrackingDetectionEvaluator:
         # === PRECISION: Range-Azimuth based (can use filtered labels) ===
         num_gt_ra = len(gt_pos_ra)
 
-        # Detection precision (RA-based)
+        # Detection precision (RA-based) - average distance to matched ground truth in meters
         if len(pred_pos) > 0 and len(gt_pos_ra) > 0:
             distances_ra = cdist(pred_pos, gt_pos_ra)
             pred_indices, gt_indices = linear_sum_assignment(distances_ra)
-            valid_matches = distances_ra[pred_indices, gt_indices] <= self.distance_threshold
-            tp_precision = np.sum(valid_matches)
-            fp_precision = len(pred_pos) - tp_precision
-            detection_precision = tp_precision / (tp_precision + fp_precision) if (
-                                                                                              tp_precision + fp_precision) > 0 else 0.0
-        else:
-            detection_precision = 0.0
+            matched_distances = distances_ra[pred_indices, gt_indices]
+            valid_matches = matched_distances <= self.distance_threshold
 
-        # Tracking precision (RA-based)
+            if np.sum(valid_matches) > 0:
+                detection_precision = float(np.mean(matched_distances[valid_matches]))
+            else:
+                detection_precision = self.distance_threshold  # No valid matches
+        else:
+            detection_precision = 0.0 if len(gt_pos_ra) == 0 else self.distance_threshold
+
+        # Tracking precision (RA-based) - average distance to matched ground truth in meters
         if len(track_pos) > 0 and len(gt_pos_ra) > 0:
             distances_ra = cdist(track_pos, gt_pos_ra)
             track_indices, gt_indices = linear_sum_assignment(distances_ra)
-            valid_matches = distances_ra[track_indices, gt_indices] <= self.distance_threshold
-            tp_precision = np.sum(valid_matches)
-            fp_precision = len(track_pos) - tp_precision
-            tracking_precision = tp_precision / (tp_precision + fp_precision) if (
-                                                                                             tp_precision + fp_precision) > 0 else 0.0
+            matched_distances = distances_ra[track_indices, gt_indices]
+            valid_matches = matched_distances <= self.distance_threshold
+
+            if np.sum(valid_matches) > 0:
+                tracking_precision = float(np.mean(matched_distances[valid_matches]))
+            else:
+                tracking_precision = self.distance_threshold  # No valid matches
         else:
-            tracking_precision = 0.0
+            tracking_precision = 0.0 if len(gt_pos_ra) == 0 else self.distance_threshold
 
         metrics.update({
             'detection_precision': detection_precision,
@@ -495,7 +499,8 @@ class TrackingDetectionEvaluator:
             camera_iou = metrics['camera_iou_mean']
 
             f.write(
-                f"{'Precision (RA)':<20} {det_precision:<15.4f} {track_precision:<15.4f} {precision_improvement:>+13.1f}% {'Filtered' if summary['use_cvpr_labels_only'] else 'All':<15}\n")
+                f"{'Precision (RA) [m]':<20} {det_precision:<15.4f} {track_precision:<15.4f} "
+                f"{precision_improvement:>+13.1f}% {'Filtered' if summary['use_cvpr_labels_only'] else 'All':<15}\n")
             f.write(
                 f"{'DetA (Camera)':<20} {det_det_a:<15.4f} {track_det_a:<15.4f} {det_a_improvement:>+13.1f}% {'All Labels':<15}\n")
             f.write(f"{'Camera IoU Mean':<20} {'-':<15} {camera_iou:<15.4f} {'-':<15} {'All Labels':<15}\n")

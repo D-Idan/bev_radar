@@ -16,10 +16,10 @@ This implementation evaluates tracking performance using the following metrics:
 - Uses range-azimuth distance matching with all labels
 
 ### 3. **Precision**
-- Formula: `TP / (TP + FP)`
-- **Range-Azimuth**: Based on distance threshold matching
+- Formula: `Average distance to matched ground truth (meters)`
+- **Range-Azimuth**: Based on distance threshold matching with Hungarian assignment
 - **Camera**: Would be based on IoU threshold matching
-- Proportion of predicted detections/tracks that are correct
+- Average localization accuracy of matched predictions/tracks in meters (lower is better)
 
 ### 4. **DetA (Detection Accuracy)**
 - Formula: `(TP - FP) / GT`
