@@ -490,7 +490,7 @@ class TrackingDetectionEvaluator:
             det_precision = metrics['detection_precision']
             track_precision = metrics['tracking_precision']
             precision_improvement = (
-                        (track_precision - det_precision) / det_precision * 100) if det_precision > 0 else 0
+                    (det_precision - track_precision) / det_precision * 100) if det_precision > 0 else 0
 
             det_det_a = metrics['detection_det_a']
             track_det_a = metrics['tracking_det_a']
@@ -506,12 +506,30 @@ class TrackingDetectionEvaluator:
             f.write(f"{'Camera IoU Mean':<20} {'-':<15} {camera_iou:<15.4f} {'-':<15} {'All Labels':<15}\n")
             f.write(f"{'HOTA':<20} {'-':<15} {metrics['hota']:<15.4f} {'-':<15} {'All Labels':<15}\n")
             f.write(f"{'MOTA':<20} {'-':<15} {metrics['mota']:<15.4f} {'-':<15} {'All Labels':<15}\n")
+
+            # Calculate NCLE improvement (lower is better)
+            det_ncle = metrics['detection_ncle']
+            track_ncle = metrics['tracking_ncle']
+            ncle_improvement = ((det_ncle - track_ncle) / det_ncle * 100) if det_ncle > 0 else 0
+
             f.write(
-                f"{'NCLE':<20} {metrics['detection_ncle']:<15.4f} {metrics['tracking_ncle']:<15.4f} {'-':<15} {'All Labels':<15}\n")
+                f"{'NCLE':<20} {det_ncle:<15.4f} {track_ncle:<15.4f} {ncle_improvement:>+13.1f}% {'All Labels':<15}\n")
+
+            # Calculate TP improvement (higher is better)
+            det_tp = metrics['detection_tp']
+            track_tp = metrics['tracking_tp']
+            tp_improvement = ((track_tp - det_tp) / det_tp * 100) if det_tp > 0 else 0
+
             f.write(
-                f"{'True Positives':<20} {metrics['detection_tp']:<15d} {metrics['tracking_tp']:<15d} {'-':<15} {'All Labels':<15}\n")
+                f"{'True Positives':<20} {det_tp:<15d} {track_tp:<15d} {tp_improvement:>+13.1f}% {'All Labels':<15}\n")
+
+            # Calculate FP improvement (lower is better, so invert calculation)
+            det_fp = metrics['detection_fp']
+            track_fp = metrics['tracking_fp']
+            fp_improvement = ((det_fp - track_fp) / det_fp * 100) if det_fp > 0 else 0
+
             f.write(
-                f"{'False Positives':<20} {metrics['detection_fp']:<15d} {metrics['tracking_fp']:<15d} {'-':<15} {'All Labels':<15}\n")
+                f"{'False Positives':<20} {det_fp:<15d} {track_fp:<15d} {fp_improvement:>+13.1f}% {'All Labels':<15}\n")
 
             f.write("\n" + "=" * 80 + "\n")
             f.write("LEGEND:\n")
