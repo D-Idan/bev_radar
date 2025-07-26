@@ -93,6 +93,9 @@ class TrackingConfigurationManager:
 
             # Define evaluation parameters
             evaluation_params = {'max_distance_threshold', 'use_camera_fov_filter', 'use_cvpr_labels_only'}
+
+            # Define timing parameters
+            timing_params = {'use_constant_dt'}
             
             for key, value in overrides.items():
                 if key in root_level_params:
@@ -109,6 +112,9 @@ class TrackingConfigurationManager:
                         config['tracker_config']['kalman_config'] = {}
                     config['tracker_config']['kalman_config'][key] = value
                 elif key in evaluation_params:
+                    # Apply to tracker_config directly
+                    config['tracker_config'][key] = value
+                elif key in timing_params:
                     # Apply to tracker_config directly
                     config['tracker_config'][key] = value
                 else:

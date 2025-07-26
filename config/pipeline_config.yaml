@@ -27,9 +27,10 @@ tracking:
   # Timing parameters
   timing:
     base_dt: 0.2  # 200ms base time step
-    max_dt_gap: 0.3  # Trigger multi-step prediction for gaps > 1.0s
+    max_dt_gap: 0.3  # Trigger multi-step prediction for gaps > 0.3s
     max_time_without_update: 2.0  # Kill tracks after 1 second without update
-    max_frame_gap_time: 4.0  # Kill all tracks if frame gap > 2 seconds
+    max_frame_gap_time: 4.0  # Kill all tracks if frame gap > 4 seconds
+    use_constant_dt: false  # If true, always use base_dt regardless of actual time gaps
 
   # Association strategy and confidence parameters
   association:

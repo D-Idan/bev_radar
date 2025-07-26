@@ -38,6 +38,7 @@ def setup_tracking_system():
         'max_dt_gap': 1.0,  # Trigger multi-step prediction for gaps > 1.0s
         'max_time_without_update': 2.0,  # Kill tracks after 2 seconds
         'max_frame_gap_time': 5.0,       # Kill all tracks if frame gap > 5 seconds
+        'use_constant_dt': False,  # Use actual time gaps by default
 
         # Confidence-based parameters
         'min_confidence_init': 0.5,

@@ -94,6 +94,7 @@ class RadarTracker:
         self.max_velocity_ms = config['max_velocity_ms']
         self.base_dt = config['base_dt']
         self.max_dt_gap = config['max_dt_gap']
+        self.use_constant_dt = config['use_constant_dt']
         self.prediction_history = {}  # Track ID -> list of predictions
         self.gap_predictions = {}  # Track ID -> predictions during gaps
         self.max_time_without_update = config['max_time_without_update']
@@ -170,7 +171,10 @@ class RadarTracker:
             List of active tracks
         """
         # Calculate frame time step with comprehensive logic
-        if current_time is not None and self.last_update_time is not None:
+        if self.use_constant_dt:
+            # Force constant dt regardless of actual time gaps
+            frame_dt = self.base_dt
+        elif current_time is not None and self.last_update_time is not None:
             # Use actual time difference when timestamps are available
             frame_dt = current_time - self.last_update_time
 
@@ -300,7 +304,8 @@ class RadarTracker:
         # Update last update time if provided
         if current_time is not None:
             # After processing matches, check time-based termination
-            self._remove_time_expired_tracks(current_time)
+            if not self.use_constant_dt:
+                self._remove_time_expired_tracks(current_time)
             self.last_update_time = current_time
 
         return self._get_confirmed_tracks()
@@ -333,9 +338,13 @@ class RadarTracker:
         tracks_to_keep = []
 
         for track in self.tracks:
-            # Get time since last update for this specific track
-            last_update = self.track_last_update_times.get(track.id, current_time - time_gap)
-            track_time_gap = current_time - last_update
+            # Use constant dt if enabled
+            if self.use_constant_dt:
+                track_time_gap = self.base_dt
+            else:
+                # Get time since last update for this specific track
+                last_update = self.track_last_update_times.get(track.id, current_time - time_gap)
+                track_time_gap = current_time - last_update
 
             # Perform prediction (either single-step or multi-step)
             if track_time_gap > self.max_dt_gap:

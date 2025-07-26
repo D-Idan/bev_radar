@@ -224,6 +224,7 @@ class RadarProcessingPipeline:
             'max_dt_gap': self.config['tracking']['timing']['max_dt_gap'],
             'max_time_without_update': self.config['tracking']['timing']['max_time_without_update'],
             'max_frame_gap_time': self.config['tracking']['timing']['max_frame_gap_time'],
+            'use_constant_dt': self.config['tracking']['timing']['use_constant_dt'],
 
             # Association strategy
             'association_strategy': self.config['tracking']['association']['strategy'],
