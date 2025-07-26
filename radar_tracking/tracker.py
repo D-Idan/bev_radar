@@ -4,7 +4,7 @@ Main tracking logic implementing SORT-like algorithm for radar objects.
 """
 import numpy as np
 from typing import List, Dict, Tuple, Optional
-from radar_tracking.data_structures import Detection, Track, OdometryData
+from radar_tracking.data_structures import Detection, Track, OdometryData, DetectionDecision
 from radar_tracking.kalman_filter import RadarKalmanFilter
 from radar_tracking.metrics import RadarMetrics
 from radar_tracking.coordinate_transforms import euclidean_distance, cartesian_to_polar
@@ -148,6 +148,9 @@ class RadarTracker:
         self.next_id = 1
         self.frame_count = 0
 
+        # Detection decision tracking
+        self.detection_decisions: List[DetectionDecision] = []
+
         # Timestamp tracking
         self.last_update_time = None
         self.track_last_update_times = {}  # Track ID -> last update timestamp
@@ -199,13 +202,27 @@ class RadarTracker:
         low_conf_detections = [det for det in detections
                                if det.confidence < self.min_confidence_assoc]
 
+        # Record low confidence detection decisions
+        for i, det in enumerate(detections):
+            if det.confidence < self.min_confidence_assoc:
+                self.detection_decisions.append(DetectionDecision(
+                    frame_id=self.frame_count,
+                    detection_idx=i,
+                    detection=det,
+                    decision='filtered_low_conf',
+                    confidence=det.confidence,
+                    min_confidence_required=self.min_confidence_assoc,
+                    reason=f'confidence {det.confidence:.3f} < min_assoc {self.min_confidence_assoc}'
+                ))
+
         # Store pre-track info for visualization
         self.last_frame_info = {
             'all_detections': detections,
             'high_conf_detections': high_conf_detections,
             'low_conf_detections': low_conf_detections,
             'track_init_decisions': [],  # Will be populated during track creation
-            'tentative_association_rejections': []
+            'tentative_association_rejections': [],
+            'hungarian_rejected_associations': []
         }
 
         # Perform predictions based on actual time gap
@@ -221,7 +238,7 @@ class RadarTracker:
             self._remove_out_of_range_tracks()
 
         # Associate detections with tracks using high-confidence detections only
-        matches, unmatched_detections, unmatched_tracks, nearest_distances = (
+        matches, unmatched_detections, unmatched_tracks, nearest_distances, chi2_distances, rejected_associations = (
             self._associate(high_conf_detections, frame_dt))
 
         # Reset association flags for all tracks
@@ -242,6 +259,19 @@ class RadarTracker:
             # Store in mapping by track ID
             associated_detections_by_track_id[track.id] = high_conf_detections[det_idx]
 
+            # Record association decision
+            self.detection_decisions.append(DetectionDecision(
+                frame_id=self.frame_count,
+                detection_idx=det_idx,
+                detection=high_conf_detections[det_idx],
+                decision='associated',
+                track_id=track.id,
+                distance=distance,
+                threshold=self.default_chi2_threshold if self.association_strategy == AssociationStrategy.MAHALANOBIS_DISTANCE else distance_threshold,
+                confidence=high_conf_detections[det_idx].confidence,
+                chi2_distances_to_all_tracks=chi2_distances.get(det_idx, {})
+            ))
+
             if track.hits < self.min_hits:  # This is a tentative track
                 tentative_associations.append({
                     'track': track,
@@ -255,6 +285,7 @@ class RadarTracker:
         self.last_frame_info['tentative_associations'] = tentative_associations
         # Store the mapping in last_frame_info
         self.last_frame_info['associated_detections_by_track_id'] = associated_detections_by_track_id
+        self.last_frame_info['hungarian_rejected_associations'] = rejected_associations
 
 
         # Handle unmatched tracks
@@ -286,15 +317,54 @@ class RadarTracker:
             if detection.confidence >= self.min_confidence_init:
                 # Additional check: only create tracks for detections within radar coverage
                 if self._is_within_radar_coverage(detection):
+                    # Check if this detection was rejected
+                    rejection_reason = None
+                    for rej in rejected_associations:
+                        if rej['det_idx'] == det_idx:
+                            if rej.get('reason') == 'all_tracks_above_threshold':
+                                rejection_reason = f"All tracks above threshold (best: T{rej['track_id']} χ²={rej['cost']:.3f})"
+                            else:
+                                rejection_reason = f"Hungarian assigned to T{rej['track_id']} but rejected: cost={rej['cost']:.3f}"
+                            break
+
+                    self.detection_decisions.append(DetectionDecision(
+                        frame_id=self.frame_count,
+                        detection_idx=det_idx,
+                        detection=detection,
+                        decision='new_track',
+                        track_id=self.next_id - 1,
+                        confidence=detection.confidence,
+                        chi2_distances_to_all_tracks=chi2_distances.get(det_idx, {}),
+                        reason=rejection_reason
+                    ))
                     self._initiate_track(detection)
                     decision['track_created'] = True
                     decision['new_track_id'] = self.next_id - 1
                 else:
                     decision['track_created'] = False
                     decision['reason'] = 'outside_coverage'
+                    self.detection_decisions.append(DetectionDecision(
+                        frame_id=self.frame_count,
+                        detection_idx=det_idx,
+                        detection=detection,
+                        decision='rejected_new_track',
+                        reason='outside_coverage',
+                        confidence=detection.confidence,
+                        chi2_distances_to_all_tracks=chi2_distances.get(det_idx, {})
+                    ))
             else:
                 decision['track_created'] = False
                 decision['reason'] = 'low_confidence'
+                self.detection_decisions.append(DetectionDecision(
+                    frame_id=self.frame_count,
+                    detection_idx=det_idx,
+                    detection=detection,
+                    decision='rejected_new_track',
+                    reason=f'confidence {detection.confidence:.3f} < min_init {self.min_confidence_init}',
+                    confidence=detection.confidence,
+                    min_confidence_required=self.min_confidence_init,
+                    chi2_distances_to_all_tracks=chi2_distances.get(det_idx, {})
+                ))
 
             self.last_frame_info['track_init_decisions'].append(decision)
 
@@ -307,6 +377,9 @@ class RadarTracker:
             if not self.use_constant_dt:
                 self._remove_time_expired_tracks(current_time)
             self.last_update_time = current_time
+
+        # Increment frame count after processing
+        self.frame_count += 1
 
         return self._get_confirmed_tracks()
 
@@ -498,7 +571,7 @@ class RadarTracker:
         self.tracks = tracks_to_keep
 
     def _associate(self, detections: List[Detection], dt: float) -> Tuple[
-        List[Tuple[int, int, float]], List[int], List[int], Dict[int, float]]:
+        List[Tuple[int, int, float]], List[int], List[int], Dict[int, float], Dict[int, Dict[int, float]], List[Dict]]:
         """
         Associate detections with existing tracks using Hungarian algorithm.
         Updated to use dynamic distance threshold.
@@ -508,30 +581,106 @@ class RadarTracker:
             dt: Time step for this frame (used for dynamic thresholding)
 
         Returns:
-            Tuple of (matches, unmatched_detections, unmatched_tracks, nearest_distances)
+            Tuple of (matches, unmatched_detections, unmatched_tracks, nearest_distances, chi2_distances)
             where nearest_distances is Dict[track_idx -> nearest_detection_distance]
+            and chi2_distances is Dict[detection_idx -> Dict[track_idx -> chi2_distance]]
         """
         if not self.tracks or not detections:
-            return [], list(range(len(detections))), list(range(len(self.tracks))), {}
+            return [], list(range(len(detections))), list(range(len(self.tracks))), {}, {}, []
 
         # Calculate dynamic distance threshold
         distance_threshold = self.max_velocity_ms * dt
 
         # Create cost matrix using selected strategy
-        cost_matrix = self._create_cost_matrix(detections, distance_threshold)
+        cost_matrix, chi2_distances = self._create_cost_matrix(detections, distance_threshold)
         nearest_distances = {}  # track_idx -> nearest_distance
 
         if cost_matrix.size > 0:
-            # Apply Hungarian algorithm
-            track_indices, det_indices = linear_sum_assignment(cost_matrix)
+            # Pre-filter cost matrix: set invalid associations to LARGE_COST
+            filtered_cost_matrix = cost_matrix.copy()
+            valid_associations_exist = False
+            # Track which associations were filtered out
+            pre_filtered_associations = []
+            for t_idx in range(len(self.tracks)):
+                for d_idx in range(len(detections)):
+                    # Check if this association would be valid
+                    if not self._is_valid_association(cost_matrix[t_idx, d_idx], detections[d_idx], distance_threshold,
+                                                      t_idx):
+                        filtered_cost_matrix[t_idx, d_idx] = self.LARGE_COST
+                        pre_filtered_associations.append({
+                            'track_idx': t_idx,
+                            'det_idx': d_idx,
+                            'track_id': self.tracks[t_idx].id,
+                            'cost': cost_matrix[t_idx, d_idx]
+                        })
+                    else:
+                        valid_associations_exist = True
 
-            # Filter matches by distance threshold and confidence requirements
+            # Only run Hungarian if there are valid associations
+            if not valid_associations_exist:
+                # No valid associations possible
+                matches = []
+                unmatched_tracks = list(range(len(self.tracks)))
+                unmatched_detections = list(range(len(detections)))
+                rejected_associations = []
+
+                # Record why each detection couldn't be associated - find best (minimum cost) track for each detection
+                for d_idx, det in enumerate(detections):
+                    min_cost = float('inf')
+                    best_track_idx = None
+                    best_track_id = None
+
+                    for t_idx, track in enumerate(self.tracks):
+                        if cost_matrix[t_idx, d_idx] < min_cost:
+                            min_cost = cost_matrix[t_idx, d_idx]
+                            best_track_idx = t_idx
+                            best_track_id = track.id
+
+                    if best_track_idx is not None and min_cost < self.LARGE_COST:
+                        rejected_associations.append({
+                            'track_idx': best_track_idx,
+                            'det_idx': d_idx,
+                            'track_id': best_track_id,
+                            'cost': min_cost,
+                            'distance_threshold': distance_threshold,
+                            'chi2_threshold': self.default_chi2_threshold,
+                            'detection_confidence': det.confidence,
+                            'track_hits': self.tracks[best_track_idx].hits,
+                            'association_strategy': self.association_strategy.value,
+                            'reason': 'all_tracks_above_threshold'
+                        })
+
+                return matches, unmatched_detections, unmatched_tracks, {}, chi2_distances, rejected_associations
+
+            # Apply Hungarian algorithm on filtered matrix
+            track_indices, det_indices = linear_sum_assignment(filtered_cost_matrix)
+
+            # Process Hungarian results - all should be valid now
             matches = []
+            rejected_associations = []
             for t_idx, d_idx in zip(track_indices, det_indices):
-                distance = cost_matrix[t_idx, d_idx]
+                distance = cost_matrix[t_idx, d_idx]  # Use original cost for reporting
+
+                # Skip if Hungarian assigned to LARGE_COST (no valid assignment)
+                if filtered_cost_matrix[t_idx, d_idx] >= self.LARGE_COST:
+                    continue
+
+                # Double-check validity (should always pass now)
                 if self._is_valid_association(cost_matrix[t_idx, d_idx], detections[d_idx], distance_threshold, t_idx):
                     matches.append((t_idx, d_idx, distance))
                 else:
+                    # Record why this Hungarian assignment was rejected
+                    rejected_associations.append({
+                        'track_idx': t_idx,
+                        'det_idx': d_idx,
+                        'track_id': self.tracks[t_idx].id,
+                        'cost': cost_matrix[t_idx, d_idx],
+                        'distance_threshold': distance_threshold,
+                        'chi2_threshold': self.default_chi2_threshold,
+                        'detection_confidence': detections[d_idx].confidence,
+                        'track_hits': self.tracks[t_idx].hits,
+                        'association_strategy': self.association_strategy.value
+                    })
                     # Check if this was a tentative track rejection due to strict confidence
                     track = self.tracks[t_idx]
                     detection = detections[d_idx]
@@ -547,6 +696,20 @@ class RadarTracker:
                             'required_confidence': self.min_confidence_init,
                             'actual_confidence': detection.confidence
                         })
+                        # Record tentative rejection decision
+                        self.detection_decisions.append(DetectionDecision(
+                            frame_id=self.frame_count,
+                            detection_idx=d_idx,
+                            detection=detection,
+                            decision='tentative_rejected',
+                            track_id=track.id,
+                            distance=distance,
+                            threshold=self.default_chi2_threshold if self.association_strategy == AssociationStrategy.MAHALANOBIS_DISTANCE else distance_threshold,
+                            reason=f'tentative track confidence {detection.confidence:.3f} < min_init {self.min_confidence_init}',
+                            confidence=detection.confidence,
+                            min_confidence_required=self.min_confidence_init,
+                            chi2_distances_to_all_tracks=chi2_distances.get(d_idx, {})
+                        ))
 
             # Find unmatched tracks and detections
             matched_tracks = {t_idx for t_idx, _, _ in matches}
@@ -570,10 +733,12 @@ class RadarTracker:
             matches = []
             unmatched_tracks = list(range(len(self.tracks)))
             unmatched_detections = list(range(len(detections)))
+            rejected_associations = []
 
-        return matches, unmatched_detections, unmatched_tracks, nearest_distances
+        return matches, unmatched_detections, unmatched_tracks, nearest_distances, chi2_distances, rejected_associations
 
-    def _create_cost_matrix(self, detections: List[Detection], distance_threshold: float) -> np.ndarray:
+    def _create_cost_matrix(self, detections: List[Detection], distance_threshold: float) -> Tuple[
+        np.ndarray, Dict[int, Dict[int, float]]]:
         """
         Create cost matrix using the selected association strategy.
         Updated to use dynamic distance threshold.
@@ -583,11 +748,12 @@ class RadarTracker:
             distance_threshold: Dynamic distance threshold for this frame
 
         Returns:
-            Cost matrix for Hungarian algorithm
+            Tuple of (cost_matrix, chi2_distances) where chi2_distances maps det_idx -> {track_id -> chi2_distance}
         """
         # Use large finite value instead of infinity for Hungarian algorithm
         self.LARGE_COST = 1e90
         cost_matrix = np.full((len(self.tracks), len(detections)), self.LARGE_COST)
+        chi2_distances = {d: {} for d in range(len(detections))}
 
         for t, track in enumerate(self.tracks):
             for d, detection in enumerate(detections):
@@ -638,6 +804,7 @@ class RadarTracker:
                             )
 
                         cost_matrix[t, d] = mahal_dist
+                        chi2_distances[d][track.id] = mahal_dist
 
                     elif self.association_strategy == AssociationStrategy.HYBRID_SCORE:
                         # Combine distance, confidence, and track quality
@@ -661,7 +828,7 @@ class RadarTracker:
 
                         cost_matrix[t, d] = distance_cost + confidence_cost + mahal_cost + track_bonus
 
-        return cost_matrix
+        return cost_matrix, chi2_distances
 
     def _is_valid_association(self, cost: float, detection: Detection, distance_threshold: float,
                               track_idx: int = None) -> bool:
@@ -831,6 +998,20 @@ class RadarTracker:
     def get_all_tracks(self) -> List[Track]:
         """Get all active tracks (confirmed and tentative)."""
         return deepcopy(self.tracks)
+
+    def _get_confirmed_tracks(self) -> List[Track]:
+        """
+        Return only those tracks that have seen at least `min_hits` detections.
+        """
+        return [
+            track
+            for track in self.tracks
+            if track.hits >= self.min_hits
+        ]
+
+    def get_detection_decisions(self) -> List[DetectionDecision]:
+        """Get all detection decisions for export."""
+        return self.detection_decisions.copy()
 
     def reset(self):
         """Reset tracker state."""

@@ -534,6 +534,9 @@ def offline_tracking(
 
         sys.stdout = original_stdout
 
+    # Save detection decisions to CSV
+    manager.save_detection_decisions_csv(output_paths['tracks'] / 'detection_decisions.csv')
+
     # Run evaluation
     eval_report_path, report = evaluate_tracking_sequence(
                         predictions_csv= preds_csv,

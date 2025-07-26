@@ -149,6 +149,20 @@ class TrackingResult:
     match_ratio: float
     average_distance: float
 
+@dataclass
+class DetectionDecision:
+    """Records what happened to a detection during tracking."""
+    frame_id: int
+    detection_idx: int
+    detection: Detection
+    decision: str  # 'associated', 'filtered_low_conf', 'new_track', 'rejected_new_track', 'tentative_rejected'
+    track_id: Optional[int] = None
+    distance: Optional[float] = None
+    threshold: Optional[float] = None
+    reason: Optional[str] = None
+    confidence: Optional[float] = None
+    min_confidence_required: Optional[float] = None
+    chi2_distances_to_all_tracks: Optional[Dict[int, float]] = None  # track_id -> chi2_distance
 
 @dataclass
 class OdometryData:

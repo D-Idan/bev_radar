@@ -231,12 +231,70 @@ class TrackletManager:
 
     def export_results(self) -> Dict:
         """Export all tracking results for analysis."""
+        detection_decisions = []
+        if hasattr(self.tracker, 'get_detection_decisions'):
+            detection_decisions = self.tracker.get_detection_decisions()
+
         return {
             "frame_results": self.frame_results,
             "active_tracklets": self.active_tracklets,
             "historical_tracklets": self.historical_tracklets,
-            "summary": self.get_tracking_summary()
+            "summary": self.get_tracking_summary(),
+            "detection_decisions": detection_decisions
         }
+
+    def save_detection_decisions_csv(self, output_path: str):
+        """Save detection decisions to CSV file."""
+        import csv
+        from pathlib import Path
+
+        decisions = self.tracker.get_detection_decisions() if hasattr(self.tracker, 'get_detection_decisions') else []
+
+        if not decisions:
+            print("No detection decisions to save")
+            return
+
+        # Ensure output directory exists
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_path, 'w', newline='') as csvfile:
+            fieldnames = [
+                'frame_id', 'detection_idx', 'decision', 'track_id',
+                'detection_confidence', 'min_confidence_required',
+                'distance', 'threshold', 'reason',
+                'range_m', 'azimuth_deg', 'x_m', 'y_m',
+                'chi2_to_tracks', 'hungarian_assignment'
+            ]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for decision in decisions:
+                chi2_str = ""
+                if decision.chi2_distances_to_all_tracks:
+                    chi2_str = "; ".join([f"T{tid}:{dist:.3f}" for tid, dist in
+                                          sorted(decision.chi2_distances_to_all_tracks.items())])
+
+                row = {
+                    'frame_id': decision.frame_id,
+                    'detection_idx': decision.detection_idx,
+                    'decision': decision.decision,
+                    'track_id': decision.track_id or '',
+                    'detection_confidence': f"{decision.detection.confidence:.3f}",
+                    'min_confidence_required': f"{decision.min_confidence_required:.3f}" if decision.min_confidence_required else '',
+                    'distance': f"{decision.distance:.3f}" if decision.distance is not None else '',
+                    'threshold': f"{decision.threshold:.3f}" if decision.threshold is not None else '',
+                    'reason': decision.reason or '',
+                    'range_m': f"{decision.detection.range_m:.2f}",
+                    'azimuth_deg': f"{np.degrees(decision.detection.azimuth_rad):.2f}",
+                    'x_m': f"{decision.detection.cartesian_pos[0]:.2f}",
+                    'y_m': f"{decision.detection.cartesian_pos[1]:.2f}",
+                    'chi2_to_tracks': chi2_str,
+                    'hungarian_assignment': decision.reason if 'Hungarian' in (decision.reason or '') else ''
+
+                }
+                writer.writerow(row)
+
+        print(f"Saved {len(decisions)} detection decisions to {output_path}")
 
     def reset(self):
         """Reset all tracking state."""
