@@ -144,11 +144,13 @@ def build_ground_truth_for_frame(
     for _, row in sub.iterrows():
         r = float(row['radar_R_m'])
         az_deg = float(row['radar_A_deg'])
+        timestamp_s = row['timestamp_us']
         gt = Detection(
             range_m=r,
             azimuth_rad=np.radians(az_deg),
             confidence=1.0,  # ground truth = perfect confidence
-            timestamp=float(frame_id)
+            timestamp=timestamp_s,
+            frame_id=frame_id
         )
         # Add ID if available
         if 'ID' in row and not pd.isna(row['ID']):

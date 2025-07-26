@@ -66,29 +66,29 @@ def extract_kalman_data_for_track(track_history: List[Tuple], all_frames: List[i
                         'y_uncertainty': np.sqrt(covariance[1, 1])
                     })
 
-        # Find associated ground truth for this frame
-        frame_idx = all_frames.index(frame_id) if frame_id in all_frames else None
-        if frame_idx is not None and frame_idx < len(all_ground_truth):
-            track_x, track_y = track.position
+                # Find associated ground truth for this exact frame only
+                frame_idx = all_frames.index(frame_id) if frame_id in all_frames else None
+                if frame_idx is not None and frame_idx < len(all_ground_truth):
+                    track_x, track_y = track.position
+                    closest_gt = None
+                    min_distance = float('inf')
 
-            closest_gt = None
-            min_distance = float('inf')
+                    # Only search in the ground truth for this specific frame
+                    for gt in all_ground_truth[frame_idx]:
+                        gt_x, gt_y = gt.cartesian_pos
+                        distance = euclidean_distance((track_x, track_y), (gt_x, gt_y))
 
-            for gt in all_ground_truth[frame_idx]:
-                gt_x, gt_y = gt.cartesian_pos
-                distance = euclidean_distance((track_x, track_y), (gt_x, gt_y))
+                        if distance <= association_distance_threshold and distance < min_distance:
+                            min_distance = distance
+                            closest_gt = gt
 
-                if distance <= association_distance_threshold and distance < min_distance:
-                    min_distance = distance
-                    closest_gt = gt
-
-            if closest_gt is not None:
-                gt_x, gt_y = closest_gt.cartesian_pos
-                ground_truth_data.append({
-                    'timestamp': timestamp,
-                    'x': float(gt_x),
-                    'y': float(gt_y)
-                })
+                    if closest_gt is not None:
+                        gt_x, gt_y = closest_gt.cartesian_pos
+                        ground_truth_data.append({
+                            'timestamp': timestamp,
+                            'x': float(gt_x),
+                            'y': float(gt_y)
+                        })
 
     # Sort all data by timestamp
     prediction_data.sort(key=lambda x: x['timestamp'])
