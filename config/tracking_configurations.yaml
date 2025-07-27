@@ -3,53 +3,101 @@
 # Each configuration defines overrides to apply to the base tracker config
 
 configurations:
-  baseline_tracking:
-    description: "Basic tracking configuration"
+  # Core algorithm comparison (cars only)
+  mahalanobis_baseline:
+    description: "Mahalanobis distance strategy baseline"
     overrides:
+      strategy: "mahalanobis_distance"
+      min_confidence_init: 0.5
+      min_confidence_assoc: 0.2
       use_adaptive_r_in_association: false
       use_adaptive_r_in_update: false
-      min_confidence_init: 0.8
-      min_confidence_assoc: 0.5
 
-  baseline_constant_dt:
-    description: "Basic tracking with constant dt (ignores time gaps)"
-    overrides:
-      use_adaptive_r_in_association: false
-      use_adaptive_r_in_update: false
-      min_confidence_init: 0.8
-      min_confidence_assoc: 0.5
-      use_constant_dt: true
-
-#  adaptive_assoc_squared:
-#    description: "Adaptive R in association with squared weighting"
-#    overrides:
-#      use_adaptive_r_in_association: true
-#      use_adaptive_r_in_update: false
-#      r_weighting_strategy: "squared"
-#      min_confidence_init: 0.8  # Minimum confidence to create new tracks
-#      min_confidence_assoc: 0.5  # Minimum confidence for detection-track association
-#      r_max_factor: 10000
-
-  distance_only:
-    description: "Adaptive R in association with squared weighting"
+  distance_only_baseline:
+    description: "Distance-only strategy baseline"
     overrides:
       strategy: "distance_only"
+      min_confidence_init: 0.5
+      min_confidence_assoc: 0.2
+      use_adaptive_r_in_association: false
+      use_adaptive_r_in_update: false
 
-
-
-  adaptive_assoc_linear:
-    description: "Adaptive R in association with linear weighting"
+  # Confidence threshold experiments
+  no_confidence_mahalanobis:
+    description: "Mahalanobis with no confidence filtering"
     overrides:
+      strategy: "mahalanobis_distance"
+      min_confidence_init: 0.0
+      min_confidence_assoc: 0.0
+      strict_confidence_for_tentative_tracks: false
+      use_adaptive_r_in_association: false
+      use_adaptive_r_in_update: false
+
+  no_confidence_distance:
+    description: "Distance-only with no confidence filtering"
+    overrides:
+      strategy: "distance_only"
+      min_confidence_init: 0.0
+      min_confidence_assoc: 0.0
+      strict_confidence_for_tentative_tracks: false
+      use_adaptive_r_in_association: false
+      use_adaptive_r_in_update: false
+
+  high_confidence_mahalanobis:
+    description: "Mahalanobis with high confidence thresholds"
+    overrides:
+      strategy: "mahalanobis_distance"
+      min_confidence_init: 0.8
+      min_confidence_assoc: 0.6
+      strict_confidence_for_tentative_tracks: true
+      use_adaptive_r_in_association: false
+      use_adaptive_r_in_update: false
+
+  # Timing comparison
+  constant_dt_mahalanobis:
+    description: "Mahalanobis with constant delta_t"
+    overrides:
+      strategy: "mahalanobis_distance"
+      min_confidence_init: 0.5
+      min_confidence_assoc: 0.2
+      use_constant_dt: true
+      use_adaptive_r_in_association: false
+      use_adaptive_r_in_update: false
+
+  variable_dt_mahalanobis:
+    description: "Mahalanobis with variable delta_t"
+    overrides:
+      strategy: "mahalanobis_distance"
+      min_confidence_init: 0.5
+      min_confidence_assoc: 0.2
+      use_constant_dt: false
+      use_adaptive_r_in_association: false
+      use_adaptive_r_in_update: false
+
+  # Adaptive R experiments
+  adaptive_r_association:
+    description: "Adaptive R in association only"
+    overrides:
+      strategy: "mahalanobis_distance"
+      min_confidence_init: 0.5
+      min_confidence_assoc: 0.2
       use_adaptive_r_in_association: true
       use_adaptive_r_in_update: false
       r_weighting_strategy: "linear"
       r_min_factor: 0.5
-      r_max_factor: 10
-      process_noise_q_std: 1.0
-      measurement_noise_std: 0.9
-      initial_pos_std: 4.0
-      initial_vel_std: 2.0
-      min_hits: 3
+      r_max_factor: 10.0
+
+  adaptive_r_full:
+    description: "Adaptive R in both association and update"
+    overrides:
+      strategy: "mahalanobis_distance"
+      min_confidence_init: 0.5
+      min_confidence_assoc: 0.2
+      use_adaptive_r_in_association: true
+      use_adaptive_r_in_update: true
+      r_weighting_strategy: "linear"
+      r_min_factor: 0.5
+      r_max_factor: 10.0
 
 #
 #  adaptive_assoc_squared:
@@ -79,19 +127,37 @@ configurations:
 #      min_confidence_assoc: 0.4
 #      confidence_weight: 0.5
 
+  adaptive_assoc_linear:
+    description: "Adaptive R in association with linear weighting"
+    overrides:
+      create_video: true
+      use_adaptive_r_in_association: true
+      use_adaptive_r_in_update: false
+      r_weighting_strategy: "linear"
+      r_min_factor: 0.5
+      r_max_factor: 10
+      process_noise_q_std: 1.0
+      measurement_noise_std: 0.9
+      initial_pos_std: 4.0
+      initial_vel_std: 2.0
+      min_hits: 3
+
 # Default configurations to run (when no specific configs are requested)
 default_configurations:
-  - baseline_tracking
+#  - baseline_tracking
 #  - distance_only
 #  - adaptive_assoc_squared
 #  - adaptive_assoc_stepped
 #  - adaptive_assoc_linear
-  - adaptive10_assoc_linear
-  - adaptive100_assoc_linear
-  - adaptive1000_assoc_linear
-  - adaptive10000_assoc_linear
-  - adaptive100000_assoc_linear
-#  - # experimental_high_confidence
+  - mahalanobis_baseline
+  - distance_only_baseline
+  - no_confidence_mahalanobis
+  - no_confidence_distance
+  - high_confidence_mahalanobis
+  - constant_dt_mahalanobis
+  - variable_dt_mahalanobis
+  - adaptive_r_association
+  - adaptive_r_full
 
 # Baseline is raw predictions (not a tracking configuration)
 baseline_config: "raw_predictions"
