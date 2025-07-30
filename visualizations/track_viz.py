@@ -1,11 +1,14 @@
+import gc
+
 import matplotlib.pyplot as plt
 from adjustText import adjust_text
-from matplotlib import cm
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+
 import numpy as np
 from pathlib import Path
 from typing import List, Optional, Tuple
 from radar_tracking import Detection, Track
-from copy import deepcopy
 
 from utils.radar_camera_relation import is_within_radar_coverage
 from visualization_config import VisualizationConfig as VizConfig
@@ -645,7 +648,10 @@ def visualize_frame_radar_azimuth(
 
     out_path = Path(output_dir) / f"frame_{frame_id:06d}.jpg"
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close()
+    # Ensure proper cleanup
+    plt.close('all')
+    fig.clear()
+    del fig
 
 
 def create_chi2_confidence_ellipse_polar(position: Tuple[float, float],
