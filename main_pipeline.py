@@ -8,7 +8,7 @@ This script orchestrates three main steps:
 
 All steps use direct function calls instead of subprocess calls for better integration.
 """
-
+import gc
 import os
 import sys
 import json
@@ -553,6 +553,8 @@ class RadarProcessingPipeline:
         for dataset in datasets_to_process:
             if self.process_dataset(dataset, skip_existing, specific_configs):
                 successful += 1
+                # Force garbage collection
+                gc.collect()
             else:
                 failed += 1
 
