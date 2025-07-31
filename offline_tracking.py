@@ -415,16 +415,16 @@ def offline_tracking(
 
         prev_timestamp = timestamp_s
 
-        # e) Visualize this frame (individual frame visualization)
-        visualize_frame_radar_azimuth(
-            frame_id=frame_id,
-            detections=detections,
-            ground_truth=ground_truth,
-            active_tracks=active_tracks,
-            output_dir=str(output_paths['frame_images']),
-            tracker_instance=manager.tracker,
-            radar_config=config
-        )
+        # # e) Visualize this frame (individual frame visualization)
+        # visualize_frame_radar_azimuth(
+        #     frame_id=frame_id,
+        #     detections=detections,
+        #     ground_truth=ground_truth,
+        #     active_tracks=active_tracks,
+        #     output_dir=str(output_paths['frame_images']),
+        #     tracker_instance=manager.tracker,
+        #     radar_config=config
+        # )
 
     # 5) Build DataFrame and write tracking.csv
     track_df = pd.DataFrame(tracking_rows)
