@@ -438,18 +438,27 @@ class CameraIoUCalculator:
             detection_matches = sum(1 for iou in detection_ious if iou >= self.iou_threshold)
             detection_fp = num_predictions - detection_matches
 
-            detection_det_a = (detection_matches - detection_fp) / num_labels if num_labels > 0 else 0.0
+            # DetA = TP / (TP + FP + FN)
+            # FN = num_labels - TP (ground truth objects not detected)
+            detection_fn = num_labels - detection_matches
+            detection_det_a = detection_matches / (detection_matches + detection_fp + detection_fn) if (
+                    (detection_matches + detection_fp + detection_fn) > 0) else 0.0
         else:
-            detection_det_a = 0.0 if num_labels == 0 else -num_predictions / num_labels
+            # When no detections but ground truth exists: DetA = 0 / (0 + 0 + num_labels) = 0
+            detection_det_a = 0.0
 
         # Calculate tracking metrics
         if tracking_ious:
             tracking_matches = sum(1 for iou in tracking_ious if iou >= self.iou_threshold)
             tracking_fp = num_tracks - tracking_matches
 
-            tracking_det_a = (tracking_matches - tracking_fp) / num_labels if num_labels > 0 else 0.0
+            # DetA = TP / (TP + FP + FN)
+            tracking_fn = num_labels - tracking_matches
+            tracking_det_a = tracking_matches / (tracking_matches + tracking_fp + tracking_fn) if (
+                    (tracking_matches + tracking_fp + tracking_fn) > 0) else 0.0
         else:
-            tracking_det_a = 0.0 if num_labels == 0 else -num_tracks / num_labels
+            # When no tracks but ground truth exists: DetA = 0 / (0 + 0 + num_labels) = 0
+            tracking_det_a = 0.0
 
         return {
             'detection_det_a': detection_det_a,
