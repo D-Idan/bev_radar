@@ -29,12 +29,22 @@ class ConfigurationComparisonAnalyzer:
 
     def __init__(self, key_metrics: Optional[List[str]] = None):
         """Initialize analyzer."""
+        self.existing_comparison_data = None
         self.key_metrics = key_metrics or [
-            'hota', 'mota', 'precision', 'det_a'
+            'hota', 'mota', 'precision', 'det_a', 'precision_ratio'
         ]
         self.distance_metrics = ['mean_euclidean_distance', 'motp', 'ncle']
         self.iou_metrics = ['camera_iou_mean']
         self.count_metrics = ['tp', 'fp']
+
+    def load_existing_comparison(self, dataset_root: Path):
+        """Load existing configuration comparison if it exists."""
+        comparison_file = dataset_root / 'plots' / 'configuration_comparison' / 'configuration_comparison.json'
+        if comparison_file.exists():
+            with open(comparison_file, 'r') as f:
+                self.existing_comparison_data = json.load(f)
+                return True
+        return False
 
     def compare_configurations(self, dataset_name: str, config_results: Dict[str, bool],
                                dataset_root: Path, baseline_config: str = 'raw_predictions') -> ConfigurationComparison:
@@ -50,8 +60,23 @@ class ConfigurationComparisonAnalyzer:
         Returns:
             ConfigurationComparison object with analysis results
         """
+        # Load existing comparison data if available
+        self.load_existing_comparison(dataset_root)
+
         # Collect metrics from successful tracking configurations
         config_metrics = self._collect_configuration_metrics(config_results, dataset_root)
+
+        # Merge with existing configurations if available
+        if self.existing_comparison_data:
+            existing_metrics = self.existing_comparison_data.get('metrics_comparison', {})
+            # Add configurations from existing data that are not in current run
+            for metric, metric_configs in existing_metrics.items():
+                for config_name, config_data in metric_configs.items():
+                    if config_name not in config_metrics:
+                        # Reconstruct config metrics from existing comparison
+                        if config_name not in config_metrics:
+                            config_metrics[config_name] = self._reconstruct_config_metrics_from_comparison(config_name,
+                                                                                                           existing_metrics)
 
         # Add raw predictions as baseline
         raw_predictions_metrics = self._collect_raw_predictions_baseline(dataset_root)
@@ -216,9 +241,10 @@ class ConfigurationComparisonAnalyzer:
                     metric_values.append((config_name, metric_value))
 
             if metric_values:
-                if metric in self.distance_metrics:  # Lower is better
+                # Handle metrics where lower is better
+                if metric in self.distance_metrics or metric == 'precision':  # Lower is better
                     ranked = sorted(metric_values, key=lambda x: x[1])
-                else:  # Higher is better
+                else:  # Higher is better (including precision_ratio)
                     ranked = sorted(metric_values, key=lambda x: x[1], reverse=True)
 
                 ranking[metric] = [config_name for config_name, _ in ranked]
@@ -292,6 +318,32 @@ class ConfigurationComparisonAnalyzer:
                 improvement_summary[config_name] = np.mean(improvements)
 
         return improvement_summary
+
+    def _reconstruct_config_metrics_from_comparison(self, config_name: str, existing_metrics: Dict) -> Dict:
+        """Reconstruct config metrics structure from existing comparison data."""
+        reconstructed = {
+            'tracking_performance': {},
+            'detection_performance': {},
+            'camera_iou_performance': {}
+        }
+
+        # Extract values from existing comparison
+        for metric, configs in existing_metrics.items():
+            if config_name in configs:
+                value = configs[config_name].get('value')
+                if value is not None:
+                    if metric == 'camera_iou_mean':
+                        if config_name == 'raw_predictions':
+                            reconstructed['camera_iou_performance']['detection_camera_iou'] = {'mean': value}
+                        else:
+                            reconstructed['camera_iou_performance']['tracking_camera_iou'] = {'mean': value}
+                    else:
+                        if config_name == 'raw_predictions':
+                            reconstructed['detection_performance'][metric] = value
+                        else:
+                            reconstructed['tracking_performance'][metric] = value
+
+        return reconstructed
 
     def save_comparison_report(self, comparison: ConfigurationComparison, output_dir: Path):
         """Save configuration comparison report."""

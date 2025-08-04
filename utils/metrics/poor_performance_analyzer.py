@@ -40,7 +40,8 @@ class PoorPerformanceAnalyzer:
         self.metric_name = metric_name
         self.top_k = top_k
         self.distance_metrics = ['ncle']
-        self.primary_metrics = ['hota', 'mota', 'det_a', 'precision', 'tracking_iou', 'camera_iou_mean', 'ncle', 'tp', 'fp']
+        self.primary_metrics = ['hota', 'mota', 'det_a', 'precision', 'tracking_iou', 'camera_iou_mean', 'ncle', 'tp',
+                                'fp', 'precision_ratio']
 
     def analyze_poor_performance_frames(self, evaluation_details_path: Path, output_dir: Path) -> List[
         PoorPerformanceFrame]:
@@ -65,8 +66,17 @@ class PoorPerformanceAnalyzer:
             else:
                 # Get values from metrics dictionary with prefixed keys
                 metrics = frame_info.get('metrics', {})
-                raw_value = metrics.get(f'detection_{self.metric_name}', 0)
-                tracking_value = metrics.get(f'tracking_{self.metric_name}', 0)
+                if self.metric_name == 'precision_ratio':
+                    # Calculate from TP/FP values
+                    det_tp = metrics.get('detection_tp', 0)
+                    det_fp = metrics.get('detection_fp', 0)
+                    track_tp = metrics.get('tracking_tp', 0)
+                    track_fp = metrics.get('tracking_fp', 0)
+                    raw_value = det_tp / (det_tp + det_fp) if (det_tp + det_fp) > 0 else 0.0
+                    tracking_value = track_tp / (track_tp + track_fp) if (track_tp + track_fp) > 0 else 0.0
+                else:
+                    raw_value = metrics.get(f'detection_{self.metric_name}', 0)
+                    tracking_value = metrics.get(f'tracking_{self.metric_name}', 0)
 
             # Skip invalid frames
             if raw_value == 0 or raw_value == float('inf'):

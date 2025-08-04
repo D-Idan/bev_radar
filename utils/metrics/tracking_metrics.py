@@ -317,6 +317,10 @@ class TrackingDetectionEvaluator:
         # Calculate HOTA
         hota = self._calculate_hota()
 
+        detection_tp = camera_iou_summary['detection_tp_fp']['true_positives']
+        detection_fp = camera_iou_summary['detection_tp_fp']['false_positives']
+        tracking_tp = camera_iou_summary['tracking_tp_fp']['true_positives']
+        tracking_fp = camera_iou_summary['tracking_tp_fp']['false_positives']
         report = {
             'evaluation_summary': {
                 'frames_evaluated': len(self.frame_results),
@@ -333,10 +337,14 @@ class TrackingDetectionEvaluator:
                 'camera_iou_mean': camera_iou_summary['tracking_camera_iou']['mean'],
                 'detection_ncle': camera_iou_summary['detection_ncle']['mean'],
                 'tracking_ncle': camera_iou_summary['tracking_ncle']['mean'],
-                'detection_tp': camera_iou_summary['detection_tp_fp']['true_positives'],
-                'detection_fp': camera_iou_summary['detection_tp_fp']['false_positives'],
-                'tracking_tp': camera_iou_summary['tracking_tp_fp']['true_positives'],
-                'tracking_fp': camera_iou_summary['tracking_tp_fp']['false_positives']
+                'detection_tp': detection_tp,
+                'detection_fp': detection_fp,
+                'tracking_tp': tracking_tp,
+                'tracking_fp': tracking_fp,
+                'detection_precision_ratio': detection_tp / (detection_tp + detection_fp) if
+                (detection_tp + detection_fp) > 0 else 0.0,
+                'tracking_precision_ratio': tracking_tp / (tracking_tp + tracking_fp) if
+                (tracking_tp + tracking_fp) > 0 else 0.0
             },
             'detailed_tracking_metrics': {
                 'motp': float(summary['motp'].values[0]) if not np.isnan(summary['motp'].values[0]) else None,
@@ -344,10 +352,13 @@ class TrackingDetectionEvaluator:
                 'recall': float(summary['recall'].values[0]) if not np.isnan(summary['recall'].values[0]) else 0.0
             },
             'detection_performance': detection_metrics,
+
             'tracking_performance': {**tracking_metrics,
                                      'hota': float(hota),
                                      'mota': float(summary['mota'].values[0]) if not
-                                     np.isnan(summary['mota'].values[0]) else 0.0},
+                                     np.isnan(summary['mota'].values[0]) else 0.0,
+                                     'precision_ratio': tracking_tp / (tracking_tp + tracking_fp) if
+                                     (tracking_tp + tracking_fp) > 0 else 0.0},
             'camera_iou_performance': camera_iou_summary,
             'frame_by_frame_results': self.frame_results
         }
@@ -364,9 +375,16 @@ class TrackingDetectionEvaluator:
             all_precision.append(metrics['detection_precision'])
             all_det_a.append(metrics['detection_det_a'])
 
+        # Calculate precision_ratio from frame results
+        all_detection_tp = sum(frame['metrics']['detection_tp'] for frame in self.frame_results)
+        all_detection_fp = sum(frame['metrics']['detection_fp'] for frame in self.frame_results)
+        detection_precision_ratio = all_detection_tp / (all_detection_tp + all_detection_fp) if (
+                (all_detection_tp + all_detection_fp) > 0) else 0.0
+
         return {
             'precision': np.mean(all_precision) if all_precision else 0.0,
-            'det_a': np.mean(all_det_a) if all_det_a else 0.0
+            'det_a': np.mean(all_det_a) if all_det_a else 0.0,
+            'precision_ratio': detection_precision_ratio
         }
 
     def _aggregate_tracking_metrics(self) -> Dict:
@@ -379,9 +397,16 @@ class TrackingDetectionEvaluator:
             all_precision.append(metrics['tracking_precision'])
             all_det_a.append(metrics['tracking_det_a'])
 
+        # Calculate precision_ratio from frame results
+        all_tracking_tp = sum(frame['metrics']['tracking_tp'] for frame in self.frame_results)
+        all_tracking_fp = sum(frame['metrics']['tracking_fp'] for frame in self.frame_results)
+        tracking_precision_ratio = all_tracking_tp / (all_tracking_tp + all_tracking_fp) if (
+                (all_tracking_tp + all_tracking_fp) > 0) else 0.0
+
         return {
             'precision': np.mean(all_precision) if all_precision else 0.0,
-            'det_a': np.mean(all_det_a) if all_det_a else 0.0
+            'det_a': np.mean(all_det_a) if all_det_a else 0.0,
+            'precision_ratio': tracking_precision_ratio
         }
 
     def _calculate_camera_iou_summary(self) -> Dict[str, Any]:
@@ -466,7 +491,7 @@ class TrackingDetectionEvaluator:
 
         output_path = Path(output_path)
 
-        with open(output_path, 'w') as f:
+        with (open(output_path, 'w') as f):
             f.write("TRACKING EVALUATION REPORT - TABLE FORMAT\n")
             f.write("=" * 80 + "\n\n")
 
@@ -527,9 +552,16 @@ class TrackingDetectionEvaluator:
             det_fp = metrics['detection_fp']
             track_fp = metrics['tracking_fp']
             fp_improvement = ((det_fp - track_fp) / det_fp * 100) if det_fp > 0 else 0
+            # Calculate Precision Ratio improvement (higher is better)
+            det_precision_ratio = metrics['detection_precision_ratio']
+            track_precision_ratio = metrics['tracking_precision_ratio']
 
             f.write(
                 f"{'False Positives':<20} {det_fp:<15d} {track_fp:<15d} {fp_improvement:>+13.1f}% {'All Labels':<15}\n")
+
+            precision_ratio_improvement = ((track_precision_ratio - det_precision_ratio) / det_precision_ratio * 100) if det_precision_ratio > 0 else 0
+            f.write(
+                f"{'Precision (TP/TP+FP)':<20} {det_precision_ratio:<15.4f} {track_precision_ratio:<15.4f} {precision_ratio_improvement:>+13.1f}% {'All Labels':<15}\n")
 
             f.write("\n" + "=" * 80 + "\n")
             f.write("LEGEND:\n")

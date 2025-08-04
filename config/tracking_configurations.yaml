@@ -99,6 +99,77 @@ configurations:
       r_min_factor: 0.5
       r_max_factor: 10.0
 
+  mahalanobis_low_noise:
+    description: "Mahalanobis baseline with reduced Kalman noise for stable velocity"
+    overrides:
+      strategy: "mahalanobis_distance"
+      min_confidence_init: 0.5
+      min_confidence_assoc: 0.2
+      kalman_config:
+        process_noise_q_std: 0.8  # Reduced from 1.5 for less velocity uncertainty
+        measurement_noise_std: 0.3  # Reduced from 1.5 for trusting radar more
+        initial_pos_std: 4.0
+        initial_vel_std: 2.0
+
+  adaptive_r_full_tight:
+    description: "Adaptive R in both with tighter weighting for precision stability"
+    overrides:
+      strategy: "mahalanobis_distance"
+      min_confidence_init: 0.5
+      min_confidence_assoc: 0.2
+      use_adaptive_r_in_association: true
+      use_adaptive_r_in_update: true
+      r_weighting_strategy: "linear"
+      r_min_factor: 0.7  # Increased from 0.5 to reduce under-trust in high-conf
+      r_max_factor: 5.0  # Decreased from 10.0 to limit over-damping in low-conf
+
+  high_confidence_relaxed:
+    description: "Mahalanobis with relaxed high confidence thresholds for better recall"
+    overrides:
+      strategy: "mahalanobis_distance"
+      min_confidence_init: 0.6  # Reduced from 0.8 to allow more tentative tracks
+      min_confidence_assoc: 0.4  # Reduced from 0.6 to associate medium-conf detections
+      strict_confidence_for_tentative_tracks: true
+      use_adaptive_r_in_association: false
+      use_adaptive_r_in_update: false
+
+  hybrid_low_noise_relaxed:
+    description: "Mahalanobis with low Kalman noise and relaxed confidence for balanced stability and recall"
+    overrides:
+      strategy: "mahalanobis_distance"
+      min_confidence_init: 0.6  # Relaxed from 0.8 to improve recall in medium-conf scenarios
+      min_confidence_assoc: 0.4  # Relaxed from 0.6 to associate more detections without FP surge
+      strict_confidence_for_tentative_tracks: true
+      use_adaptive_r_in_association: false
+      use_adaptive_r_in_update: true  # Enable tight adaptive R for update only, to complement low noise
+      r_weighting_strategy: "linear"
+      r_min_factor: 0.6  # Slight increase from 0.5 for precision in high-conf
+      r_max_factor: 7.0  # Midway between 5.0 and 10.0 to control damping
+      kalman_config:
+        process_noise_q_std: 0.8  # Low for velocity stability
+        measurement_noise_std: 0.3  # Low for trusting radar
+        initial_pos_std: 4.0
+        initial_vel_std: 2.0
+
+  hybrid_enhanced:
+    description: "Enhanced hybrid with optimized gating and noise for superior performance"
+    overrides:
+      strategy: "mahalanobis_distance"
+      min_confidence_init: 0.55  # Midway (0.5-0.6) for balanced init
+      min_confidence_assoc: 0.35  # Midway (0.2-0.4) for medium-conf assoc
+      strict_confidence_for_tentative_tracks: true
+      use_adaptive_r_in_association: true
+      use_adaptive_r_in_update: true
+      r_weighting_strategy: "linear"
+      r_min_factor: 0.65  # Slight increase from 0.6 for precision
+      r_max_factor: 6.0  # Midway (5-7) for damping control
+      kalman_config:
+        process_noise_q_std: 0.7  # Slight reduction from 0.8 for more stability
+        measurement_noise_std: 0.25  # Lower from 0.3 to trust high-conf more
+        initial_pos_std: 4.0
+        initial_vel_std: 2.0
+      mahalanobis:
+        default_chi2_threshold: 4.605  # 90% for looser gating in clutter
 #
 #  adaptive_assoc_squared:
 #    description: "Adaptive R in association with squared weighting"
@@ -158,6 +229,11 @@ default_configurations:
   - variable_dt_mahalanobis
   - adaptive_r_association
   - adaptive_r_full
+  - mahalanobis_low_noise
+  - adaptive_r_full_tight
+  - high_confidence_relaxed
+  - hybrid_low_noise_relaxed
+  - hybrid_enhanced
 
 # Baseline is raw predictions (not a tracking configuration)
 baseline_config: "raw_predictions"
