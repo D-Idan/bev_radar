@@ -81,10 +81,10 @@ class TrackingConfigurationManager:
 
             # Apply overrides from YAML
             overrides = config_def.get('overrides', {})
-            
+
             # Define which parameters belong at the root level vs tracker_config
-            root_level_params = {'create_video', 'max_video_samples', 'max_frames'}
-            
+            root_level_params = {'create_video', 'max_video_samples', 'max_frames', 'save_visualizations'}
+
             # Define parameters that should update nested r_weighting_config
             r_weighting_params = {'r_min_factor', 'r_max_factor', 'stepped_r_thresholds', 'stepped_r_factors'}
             

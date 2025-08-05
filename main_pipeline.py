@@ -270,6 +270,9 @@ class RadarProcessingPipeline:
             'use_camera_fov_filter': self.config['tracking']['evaluation']['use_camera_fov_filter'],
             'use_cvpr_labels_only': self.config['tracking']['evaluation']['use_cvpr_labels_only'],
 
+            # Visualization control
+            'save_visualizations': self.config['tracking']['save_visualizations'],
+
             # Poor performance analysis
             'poor_performance_analysis': {
                 'enable': self.config['tracking'].get('poor_performance_analysis', {}).get('enable', False),

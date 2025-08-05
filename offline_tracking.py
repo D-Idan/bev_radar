@@ -266,6 +266,9 @@ def offline_tracking(
     save_config_info({'preds_csv': preds_csv, 'labels_csv': labels_csv},
                      config, output_paths)
 
+    # Extract visualization flag early for use in the loop
+    save_visualizations = config['save_visualizations']
+
     # For storing the CSV rows
     tracking_rows = []
 
@@ -415,16 +418,17 @@ def offline_tracking(
 
         prev_timestamp = timestamp_s
 
-        # # e) Visualize this frame (individual frame visualization)
-        # visualize_frame_radar_azimuth(
-        #     frame_id=frame_id,
-        #     detections=detections,
-        #     ground_truth=ground_truth,
-        #     active_tracks=active_tracks,
-        #     output_dir=str(output_paths['frame_images']),
-        #     tracker_instance=manager.tracker,
-        #     radar_config=config
-        # )
+        # e) Visualize this frame (individual frame visualization)
+        if save_visualizations:
+            visualize_frame_radar_azimuth(
+                frame_id=frame_id,
+                detections=detections,
+                ground_truth=ground_truth,
+                active_tracks=active_tracks,
+                output_dir=str(output_paths['frame_images']),
+                tracker_instance=manager.tracker,
+                radar_config=config
+            )
 
     # 5) Build DataFrame and write tracking.csv
     track_df = pd.DataFrame(tracking_rows)
@@ -443,71 +447,73 @@ def offline_tracking(
     track_df.to_csv(tracking_csv_path, index=False)
 
     # 6) Generate all visualizations using the visualization functions
+    save_visualizations = tracker_config['save_visualizations']  # Default to True for backward compatibility
 
-    # a) Network Output per Frame vs. Confirmed Tracks per Frame
-    visualize_counts_vs_tracks_per_frame(
-        all_frames=all_frames,
-        det_counts=det_counts,
-        track_counts=track_counts,
-        output_dir=str(output_paths['summary_plots'])
-    )
+    if save_visualizations:
+        # a) Network Output per Frame vs. Confirmed Tracks per Frame
+        visualize_counts_vs_tracks_per_frame(
+            all_frames=all_frames,
+            det_counts=det_counts,
+            track_counts=track_counts,
+            output_dir=str(output_paths['summary_plots'])
+        )
 
-    # b) Histogram of Tracklet Lifetimes
-    visualize_tracklet_lifetime_histogram(
-        manager=manager,
-        output_dir=str(output_paths['summary_plots'])
-    )
+        # b) Histogram of Tracklet Lifetimes
+        visualize_tracklet_lifetime_histogram(
+            manager=manager,
+            output_dir=str(output_paths['summary_plots'])
+        )
 
-    # c) Average Confidence of Active Tracks Over Time
-    visualize_avg_confidence_over_time(
-        all_frames=all_frames,
-        all_tracks=all_tracks,
-        frame_times=frame_times,
-        avg_confidence_per_frame=avg_confidence_per_frame,
-        output_dir=str(output_paths['summary_plots'])
-    )
+        # c) Average Confidence of Active Tracks Over Time
+        visualize_avg_confidence_over_time(
+            all_frames=all_frames,
+            all_tracks=all_tracks,
+            frame_times=frame_times,
+            avg_confidence_per_frame=avg_confidence_per_frame,
+            output_dir=str(output_paths['summary_plots'])
+        )
 
-    # d) Comprehensive overview showing all frames data
-    visualize_all_frames_3d_overview(
-        all_detections=all_detections,
-        all_ground_truth=all_ground_truth,
-        all_tracks=all_tracks,
-        all_frames=all_frames,
-        frame_times=frame_times,
-        output_dir=str(output_paths['summary_plots']),
-        radar_config=config,
-    )
+        # d) Comprehensive overview showing all frames data
+        visualize_all_frames_3d_overview(
+            all_detections=all_detections,
+            all_ground_truth=all_ground_truth,
+            all_tracks=all_tracks,
+            all_frames=all_frames,
+            frame_times=frame_times,
+            output_dir=str(output_paths['summary_plots']),
+            radar_config=config,
+        )
 
-    # e) Temporal evolution visualization
-    visualize_tracking_temporal_evolution(
-        all_tracks=all_tracks,
-        all_ground_truth=all_ground_truth,
-        all_frames=all_frames,
-        frame_times=frame_times,
-        output_dir=str(output_paths['summary_plots']),
-        radar_config = config,
-    )
+        # e) Temporal evolution visualization
+        visualize_tracking_temporal_evolution(
+            all_tracks=all_tracks,
+            all_ground_truth=all_ground_truth,
+            all_frames=all_frames,
+            frame_times=frame_times,
+            output_dir=str(output_paths['summary_plots']),
+            radar_config = config,
+        )
 
-    # f) Kalman filter analysis for longest track
-    visualize_kalman_filter_analysis_longest_track(
-        all_tracks=all_tracks,
-        all_ground_truth=all_ground_truth,
-        all_frames=all_frames,
-        frame_times=frame_times,
-        output_dir=str(output_paths['summary_plots'])
-    )
+        # f) Kalman filter analysis for longest track
+        visualize_kalman_filter_analysis_longest_track(
+            all_tracks=all_tracks,
+            all_ground_truth=all_ground_truth,
+            all_frames=all_frames,
+            frame_times=frame_times,
+            output_dir=str(output_paths['summary_plots'])
+        )
 
-    # Visualize timing analysis
-    visualize_timing_analysis(
-        frame_times=frame_times,
-        time_gaps=time_gaps,
-        output_dir=str(output_paths['summary_plots'])
-    )
+        # Visualize timing analysis
+        visualize_timing_analysis(
+            frame_times=frame_times,
+            time_gaps=time_gaps,
+            output_dir=str(output_paths['summary_plots'])
+        )
 
-    # Visualize timing analysis
-    plot_timing_analysis(labels_csv, output_path=Path(output_paths['summary_plots']) / Path("timing_analysis.png"))
-    plot_detailed_timing_analysis(labels_csv,
-                                  output_path=Path(output_paths['summary_plots']) / Path("detailed_timing_analysis.png"))
+        # Visualize timing analysis
+        plot_timing_analysis(labels_csv, output_path=Path(output_paths['summary_plots']) / Path("timing_analysis.png"))
+        plot_detailed_timing_analysis(labels_csv,
+                                      output_path=Path(output_paths['summary_plots']) / Path("detailed_timing_analysis.png"))
 
     # Save tracking summary
     summary_file = output_paths['logs'] / 'tracking_summary.txt'
@@ -553,8 +559,8 @@ def offline_tracking(
 
     )
 
-    # Run poor performance analysis if enabled
-    if tracker_config.get('poor_performance_analysis', {}).get('enable', False):
+    # Run poor performance analysis if enabled and visualizations are enabled
+    if save_visualizations and tracker_config.get('poor_performance_analysis', {}).get('enable', False):
 
         # Get configuration name from output directory
         config_name = Path(output_dir).name
@@ -598,7 +604,8 @@ def offline_tracking(
     # Print completion message
     print(f"\nOffline tracking completed. Files written to: {output_paths['root']}")
     print(f"  • Tracking results: {tracking_csv_path}")
-    print(f"  • Visualizations: {output_paths['visualizations']}")
+    if save_visualizations:
+        print(f"  • Visualizations: {output_paths['visualizations']}")
     print(f"  • Evaluation report: {eval_report_path}")
     print(f"  • Configuration: {output_paths['config']}")
     print(f"  • Logs: {output_paths['logs']}")
