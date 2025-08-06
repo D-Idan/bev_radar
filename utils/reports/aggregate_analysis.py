@@ -16,7 +16,8 @@ class AggregateAnalysisGenerator:
     def __init__(self, key_metrics: Optional[List[str]] = None):
         """Initialize aggregate analysis generator."""
         self.key_metrics = key_metrics or [
-            'hota', 'mota', 'precision', 'det_a', 'precision_ratio'
+            'hota', 'mota', 'precision', 'det_a', 'precision_ratio',
+            'tracking_AP', 'tracking_AR', 'tracking_AF1'
         ]
         self.distance_metrics = []
 
@@ -117,9 +118,15 @@ class AggregateAnalysisGenerator:
             for config in all_configs:
                 values = []
                 for dataset_name, dataset_metrics in all_datasets_metrics.items():
-                    # All metrics are now stored in the same way in metrics_comparison
-                    metric_data = (dataset_metrics.get('metrics_comparison', {})
-                                   .get(metric, {}).get(config, {}))
+                    # Check if this is an average metric (AP, AR, AF1)
+                    if metric in ['tracking_AP', 'tracking_AR', 'tracking_AF1']:
+                        # These metrics should be in metrics_comparison after fix
+                        metric_data = (dataset_metrics.get('metrics_comparison', {})
+                                     .get(metric, {}).get(config, {}))
+                    else:
+                        # All other metrics are stored in the same way in metrics_comparison
+                        metric_data = (dataset_metrics.get('metrics_comparison', {})
+                                     .get(metric, {}).get(config, {}))
 
                     value = metric_data.get('value')
                     if value is not None and value != float('inf'):

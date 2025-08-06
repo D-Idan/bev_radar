@@ -31,7 +31,8 @@ class ConfigurationComparisonAnalyzer:
         """Initialize analyzer."""
         self.existing_comparison_data = None
         self.key_metrics = key_metrics or [
-            'hota', 'mota', 'precision', 'det_a', 'precision_ratio'
+            'hota', 'mota', 'precision', 'det_a', 'precision_ratio',
+            'tracking_AP', 'tracking_AR', 'tracking_AF1'
         ]
         self.distance_metrics = ['mean_euclidean_distance', 'motp', 'ncle']
         self.iou_metrics = ['camera_iou_mean']
@@ -120,13 +121,15 @@ class ConfigurationComparisonAnalyzer:
                     # Extract detection performance as baseline
                     detection_perf = full_metrics.get('detection_performance', {})
                     camera_iou = full_metrics.get('camera_iou_performance', {})
+                    avg_metrics = full_metrics.get('average_metrics', {})
 
                     # Create baseline metrics structure
                     baseline_metrics = {
                         'evaluation_summary': full_metrics.get('evaluation_summary', {}),
                         'detection_performance': detection_perf,  # This becomes our baseline
                         'tracking_performance': detection_perf,  # Same as detection for baseline
-                        'camera_iou_performance': camera_iou
+                        'camera_iou_performance': camera_iou,
+                        'average_metrics': avg_metrics  # Include average metrics
                     }
                     return baseline_metrics
 
@@ -171,7 +174,20 @@ class ConfigurationComparisonAnalyzer:
                     # For tracking configs, use tracking performance
                     performance_data = metrics.get('tracking_performance', {})
 
-                metric_value = performance_data.get(metric, 0.0)
+                # Check if metric is in average_metrics (for AP, AR, AF1)
+                if metric in ['tracking_AP', 'tracking_AR', 'tracking_AF1']:
+                    # Extract from average_metrics section
+                    avg_metrics = metrics.get('evaluation_summary', {}).get('average_metrics', {})
+                    if config_name == baseline_config:
+                        # For baseline, use detection average metrics
+                        metric_key = metric.replace('tracking_', '')
+                        metric_value = avg_metrics.get('detection', {}).get(metric_key, 0.0)
+                    else:
+                        # For tracking configs, use tracking average metrics
+                        metric_key = metric.replace('tracking_', '')
+                        metric_value = avg_metrics.get('tracking', {}).get(metric_key, 0.0)
+                else:
+                    metric_value = performance_data.get(metric, 0.0)
 
                 if metric_value == float('inf'):
                     metric_value = None
@@ -228,14 +244,23 @@ class ConfigurationComparisonAnalyzer:
             metric_values = []
 
             for config_name, metrics in config_metrics.items():
-                if config_name == 'raw_predictions':
-                    # For baseline, use detection performance
-                    performance_data = metrics.get('detection_performance', {})
+                if metric in ['tracking_AP', 'tracking_AR', 'tracking_AF1']:
+                    # Extract from average_metrics section
+                    avg_metrics = metrics.get('average_metrics', {})
+                    if config_name == 'raw_predictions':
+                        metric_key = metric.replace('tracking_', '')
+                        metric_value = avg_metrics.get('detection', {}).get(metric_key, 0.0)
+                    else:
+                        metric_key = metric.replace('tracking_', '')
+                        metric_value = avg_metrics.get('tracking', {}).get(metric_key, 0.0)
                 else:
-                    # For tracking configs, use tracking performance
-                    performance_data = metrics.get('tracking_performance', {})
-
-                metric_value = performance_data.get(metric, 0.0)
+                    if config_name == 'raw_predictions':
+                        # For baseline, use detection performance
+                        performance_data = metrics.get('detection_performance', {})
+                    else:
+                        # For tracking configs, use tracking performance
+                        performance_data = metrics.get('tracking_performance', {})
+                    metric_value = performance_data.get(metric, 0.0)
 
                 if metric_value != float('inf') and metric_value is not None:
                     metric_values.append((config_name, metric_value))

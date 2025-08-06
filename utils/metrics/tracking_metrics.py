@@ -15,29 +15,38 @@ from utils.metrics.camera_iou_metrics import CameraIoUCalculator
 
 class TrackingDetectionEvaluator:
     """
-    Tracking evaluation with HOTA, MOTA, IoU, DetA, and Precision metrics.
+    Tracking evaluation with HOTA, MOTA, IoU, DetA, Precision, Recall, and F1 metrics.
 
     Metric Categories:
     - Precision: Range-azimuth based (uses radar coordinates)
     - DetA, IoU: Camera bounding box based (uses pixel coordinates)
     - MOTA, HOTA: Identity tracking (uses camera bounding boxes + track IDs)
     - Camera IoU: Bounding box overlap (uses pixel coordinates)
+    - Recall, F1: Detection performance metrics at multiple IoU thresholds
     """
 
-    def __init__(self, distance_threshold: float = 5.0, iou_threshold: float = 0.2,
+    def __init__(self, distance_threshold: float = 5.0, iou_thresholds: list = None,
                  use_cvpr_labels_only: bool = True):
         """
         Initialize evaluator.
 
         Args:
             distance_threshold: Max distance for valid associations (meters)
-            iou_threshold: IoU threshold for evaluation
+            iou_thresholds: List of IoU thresholds for evaluation
             use_cvpr_labels_only: If True, only use labels with cvpr_updated=True for range-azimuth metrics
         """
         self.distance_threshold = distance_threshold
-        self.iou_threshold = iou_threshold
+        self.iou_thresholds = iou_thresholds if iou_thresholds else [0.3, 0.5]
+        self.iou_threshold = self.iou_thresholds[0]  # Primary threshold for compatibility
         self.use_cvpr_labels_only = use_cvpr_labels_only
-        self.camera_iou_calculator = CameraIoUCalculator(iou_threshold=iou_threshold)
+
+        # Store per-threshold metrics
+        self.threshold_metrics = {thresh: {
+            'detection_tp': 0, 'detection_fp': 0, 'detection_fn': 0,
+            'tracking_tp': 0, 'tracking_fp': 0, 'tracking_fn': 0
+        } for thresh in self.iou_thresholds}
+
+        self.camera_iou_calculator = CameraIoUCalculator(iou_threshold=self.iou_threshold)
 
         # Initialize motmetrics accumulator for MOTA calculation
         self.acc = mm.MOTAccumulator(auto_id=False)
@@ -131,6 +140,22 @@ class TrackingDetectionEvaluator:
         self.hota_data['pred_ids_per_frame'][frame_id] = track_ids
         self.hota_data['similarity_scores'][frame_id] = distances
 
+        # Calculate metrics for each IoU threshold
+        threshold_frame_metrics = {}
+        for iou_thresh in self.iou_thresholds:
+            thresh_metrics = self._calculate_threshold_metrics(
+                predictions, gt_all, tracks, frame_id, iou_thresh, image_shape=(540, 960)
+            )
+            threshold_frame_metrics[iou_thresh] = thresh_metrics
+
+            # Accumulate for sequence-level metrics
+            self.threshold_metrics[iou_thresh]['detection_tp'] += thresh_metrics['detection_tp']
+            self.threshold_metrics[iou_thresh]['detection_fp'] += thresh_metrics['detection_fp']
+            self.threshold_metrics[iou_thresh]['detection_fn'] += thresh_metrics['detection_fn']
+            self.threshold_metrics[iou_thresh]['tracking_tp'] += thresh_metrics.get('tracking_tp', 0)
+            self.threshold_metrics[iou_thresh]['tracking_fp'] += thresh_metrics.get('tracking_fp', 0)
+            self.threshold_metrics[iou_thresh]['tracking_fn'] += thresh_metrics.get('tracking_fn', 0)
+
         # Calculate frame metrics (precision uses gt_ra, others use gt_all)
         frame_metrics = self._calculate_frame_metrics(
             pred_positions, track_positions, gt_positions_ra, gt_all
@@ -196,6 +221,84 @@ class TrackingDetectionEvaluator:
                 return np.zeros((0, 2))
 
         return np.column_stack([x, y])
+
+    def _calculate_threshold_metrics(self, predictions: pd.DataFrame, ground_truth: pd.DataFrame,
+                                     tracks: pd.DataFrame, frame_id: int, iou_threshold: float,
+                                     image_shape: Tuple[int, int]) -> Dict[str, int]:
+        """Calculate TP, FP, FN for a specific IoU threshold."""
+        # Convert predictions to camera bboxes
+        pred_bboxes = []
+        for _, pred_row in predictions.iterrows():
+            bbox = self.camera_iou_calculator.range_azimuth_to_camera_bbox_consistent(
+                pred_row['range_m'], pred_row['azimuth_deg'], image_shape
+            )
+            pred_bboxes.append(bbox)
+
+        # Convert ground truth to camera bboxes
+        gt_bboxes = []
+        for _, gt_row in ground_truth.iterrows():
+            bbox = self.camera_iou_calculator.get_label_bbox_consistent(gt_row, image_shape)
+            gt_bboxes.append(bbox)
+
+        # Calculate detection metrics
+        det_tp, det_fp, det_fn = self._calculate_tp_fp_fn(pred_bboxes, gt_bboxes, iou_threshold)
+
+        metrics = {
+            'detection_tp': det_tp,
+            'detection_fp': det_fp,
+            'detection_fn': det_fn
+        }
+
+        # Calculate tracking metrics if tracks available
+        if not tracks.empty:
+            track_bboxes = []
+            for _, track_row in tracks.iterrows():
+                bbox = self.camera_iou_calculator.range_azimuth_to_camera_bbox_consistent(
+                    track_row['range_m'], track_row['azimuth_deg'], image_shape
+                )
+                track_bboxes.append(bbox)
+
+            track_tp, track_fp, track_fn = self._calculate_tp_fp_fn(track_bboxes, gt_bboxes, iou_threshold)
+            metrics.update({
+                'tracking_tp': track_tp,
+                'tracking_fp': track_fp,
+                'tracking_fn': track_fn
+            })
+
+        return metrics
+
+    def _calculate_tp_fp_fn(self, pred_bboxes: List, gt_bboxes: List, iou_threshold: float) -> Tuple[int, int, int]:
+        """Calculate TP, FP, FN using Hungarian matching at given IoU threshold."""
+        if not pred_bboxes or not gt_bboxes:
+            tp = 0
+            fp = len(pred_bboxes)
+            fn = len(gt_bboxes)
+            return tp, fp, fn
+
+        # Build IoU matrix
+        iou_matrix = np.zeros((len(pred_bboxes), len(gt_bboxes)))
+        for i, pred_bbox in enumerate(pred_bboxes):
+            for j, gt_bbox in enumerate(gt_bboxes):
+                iou_matrix[i, j] = self.camera_iou_calculator.calculate_bbox_iou(pred_bbox, gt_bbox)
+
+        # Hungarian matching
+        from scipy.optimize import linear_sum_assignment
+        pred_indices, gt_indices = linear_sum_assignment(-iou_matrix)  # Negative for maximization
+
+        tp = 0
+        matched_preds = set()
+        matched_gts = set()
+
+        for pred_idx, gt_idx in zip(pred_indices, gt_indices):
+            if iou_matrix[pred_idx, gt_idx] >= iou_threshold:
+                tp += 1
+                matched_preds.add(pred_idx)
+                matched_gts.add(gt_idx)
+
+        fp = len(pred_bboxes) - len(matched_preds)
+        fn = len(gt_bboxes) - len(matched_gts)
+
+        return tp, fp, fn
 
     def _calculate_frame_metrics(self, pred_pos: np.ndarray, track_pos: np.ndarray,
                                  gt_pos_ra: np.ndarray, ground_truth_all: pd.DataFrame) -> Dict:
@@ -321,12 +424,19 @@ class TrackingDetectionEvaluator:
         detection_fp = camera_iou_summary['detection_tp_fp']['false_positives']
         tracking_tp = camera_iou_summary['tracking_tp_fp']['true_positives']
         tracking_fp = camera_iou_summary['tracking_tp_fp']['false_positives']
+        # Calculate per-threshold metrics
+        threshold_results = self._calculate_per_threshold_metrics()
+        average_metrics = self._calculate_average_metrics()
+
         report = {
             'evaluation_summary': {
                 'frames_evaluated': len(self.frame_results),
                 'distance_threshold_m': self.distance_threshold,
-                'use_cvpr_labels_only': self.use_cvpr_labels_only
+                'use_cvpr_labels_only': self.use_cvpr_labels_only,
+                'iou_thresholds': self.iou_thresholds,
+                'average_metrics': average_metrics,
             },
+            'threshold_metrics': threshold_results,
             'primary_metrics': {
                 'hota': float(hota),
                 'mota': float(summary['mota'].values[0]) if not np.isnan(summary['mota'].values[0]) else 0.0,
@@ -344,21 +454,33 @@ class TrackingDetectionEvaluator:
                 'detection_precision_ratio': detection_tp / (detection_tp + detection_fp) if
                 (detection_tp + detection_fp) > 0 else 0.0,
                 'tracking_precision_ratio': tracking_tp / (tracking_tp + tracking_fp) if
-                (tracking_tp + tracking_fp) > 0 else 0.0
+                (tracking_tp + tracking_fp) > 0 else 0.0,
+                'detection_AP': average_metrics['detection']['AP'],
+                'detection_AR': average_metrics['detection']['AR'],
+                'detection_AF1': average_metrics['detection']['AF1'],
+                'tracking_AP': average_metrics['tracking']['AP'],
+                'tracking_AR': average_metrics['tracking']['AR'],
+                'tracking_AF1': average_metrics['tracking']['AF1'],
             },
             'detailed_tracking_metrics': {
                 'motp': float(summary['motp'].values[0]) if not np.isnan(summary['motp'].values[0]) else None,
                 'num_switches': int(summary['num_switches'].values[0]),
                 'recall': float(summary['recall'].values[0]) if not np.isnan(summary['recall'].values[0]) else 0.0
             },
-            'detection_performance': detection_metrics,
+            'detection_performance': {**detection_metrics,
+                                     'tracking_AP': average_metrics['detection']['AP'],
+                                     'tracking_AR': average_metrics['detection']['AR'],
+                                     'tracking_AF1': average_metrics['detection']['AF1']},
 
             'tracking_performance': {**tracking_metrics,
                                      'hota': float(hota),
                                      'mota': float(summary['mota'].values[0]) if not
                                      np.isnan(summary['mota'].values[0]) else 0.0,
                                      'precision_ratio': tracking_tp / (tracking_tp + tracking_fp) if
-                                     (tracking_tp + tracking_fp) > 0 else 0.0},
+                                     (tracking_tp + tracking_fp) > 0 else 0.0,
+                                     'tracking_AP': average_metrics['tracking']['AP'],
+                                     'tracking_AR': average_metrics['tracking']['AR'],
+                                     'tracking_AF1': average_metrics['tracking']['AF1']},
             'camera_iou_performance': camera_iou_summary,
             'frame_by_frame_results': self.frame_results
         }
@@ -467,6 +589,161 @@ class TrackingDetectionEvaluator:
             }
         }
 
+    def _calculate_per_threshold_metrics(self) -> Dict[float, Dict[str, float]]:
+        """Calculate Precision, Recall, and F1 Score for each IoU threshold."""
+        results = {}
+
+        for thresh in self.iou_thresholds:
+            metrics = self.threshold_metrics[thresh]
+
+            # Detection metrics
+            det_tp = metrics['detection_tp']
+            det_fp = metrics['detection_fp']
+            det_fn = metrics['detection_fn']
+
+            det_precision = det_tp / (det_tp + det_fp) if (det_tp + det_fp) > 0 else 0.0
+            det_recall = det_tp / (det_tp + det_fn) if (det_tp + det_fn) > 0 else 0.0
+            det_f1 = 2 * det_precision * det_recall / (det_precision + det_recall) if (
+                                                                                                  det_precision + det_recall) > 0 else 0.0
+
+            # Tracking metrics
+            track_tp = metrics['tracking_tp']
+            track_fp = metrics['tracking_fp']
+            track_fn = metrics['tracking_fn']
+
+            track_precision = track_tp / (track_tp + track_fp) if (track_tp + track_fp) > 0 else 0.0
+            track_recall = track_tp / (track_tp + track_fn) if (track_tp + track_fn) > 0 else 0.0
+            track_f1 = 2 * track_precision * track_recall / (track_precision + track_recall) if (
+                                                                                                            track_precision + track_recall) > 0 else 0.0
+
+            results[thresh] = {
+                'detection': {
+                    'precision': det_precision,
+                    'recall': det_recall,
+                    'f1_score': det_f1,
+                    'tp': det_tp,
+                    'fp': det_fp,
+                    'fn': det_fn
+                },
+                'tracking': {
+                    'precision': track_precision,
+                    'recall': track_recall,
+                    'f1_score': track_f1,
+                    'tp': track_tp,
+                    'fp': track_fp,
+                    'fn': track_fn
+                }
+            }
+
+        return results
+
+    def _calculate_average_metrics(self) -> Dict[str, Dict[str, float]]:
+        """Calculate Average Precision (AP) and Average Recall (AR) across IoU thresholds."""
+        threshold_metrics = self.threshold_metrics
+
+        # Collect metrics across thresholds
+        detection_precisions = []
+        detection_recalls = []
+        detection_f1s = []
+        tracking_precisions = []
+        tracking_recalls = []
+        tracking_f1s = []
+
+        for thresh in self.iou_thresholds:
+            metrics = threshold_metrics[thresh]
+
+            # Detection metrics
+            det_tp = metrics['detection_tp']
+            det_fp = metrics['detection_fp']
+            det_fn = metrics['detection_fn']
+
+            det_precision = det_tp / (det_tp + det_fp) if (det_tp + det_fp) > 0 else 0.0
+            det_recall = det_tp / (det_tp + det_fn) if (det_tp + det_fn) > 0 else 0.0
+            det_f1 = 2 * det_precision * det_recall / (det_precision + det_recall) if (
+                                                                                                  det_precision + det_recall) > 0 else 0.0
+
+            detection_precisions.append(det_precision)
+            detection_recalls.append(det_recall)
+            detection_f1s.append(det_f1)
+
+            # Tracking metrics
+            track_tp = metrics['tracking_tp']
+            track_fp = metrics['tracking_fp']
+            track_fn = metrics['tracking_fn']
+
+            track_precision = track_tp / (track_tp + track_fp) if (track_tp + track_fp) > 0 else 0.0
+            track_recall = track_tp / (track_tp + track_fn) if (track_tp + track_fn) > 0 else 0.0
+            track_f1 = 2 * track_precision * track_recall / (track_precision + track_recall) if (
+                                                                                                            track_precision + track_recall) > 0 else 0.0
+
+            tracking_precisions.append(track_precision)
+            tracking_recalls.append(track_recall)
+            tracking_f1s.append(track_f1)
+
+        # Calculate averages
+        return {
+            'detection': {
+                'AP': np.mean(detection_precisions) if detection_precisions else 0.0,
+                'AR': np.mean(detection_recalls) if detection_recalls else 0.0,
+                'AF1': np.mean(detection_f1s) if detection_f1s else 0.0
+            },
+            'tracking': {
+                'AP': np.mean(tracking_precisions) if tracking_precisions else 0.0,
+                'AR': np.mean(tracking_recalls) if tracking_recalls else 0.0,
+                'AF1': np.mean(tracking_f1s) if tracking_f1s else 0.0
+            }
+        }
+
+    def _format_threshold_summary_table(self) -> str:
+        """Generate formatted summary table for all thresholds."""
+        lines = []
+        lines.append("\n" + "=" * 100)
+        lines.append("COMPREHENSIVE THRESHOLD METRICS SUMMARY")
+        lines.append("=" * 100)
+
+        # Header
+        header = f"{'IoU Threshold':<15}"
+        for metric in ['Precision', 'Recall', 'F1']:
+            header += f"{'Det ' + metric:<15}{'Track ' + metric:<15}"
+        lines.append(header)
+        lines.append("-" * 100)
+
+        # Per-threshold rows
+        for thresh in self.iou_thresholds:
+            metrics = self.threshold_metrics[thresh]
+
+            det_tp = metrics['detection_tp']
+            det_fp = metrics['detection_fp']
+            det_fn = metrics['detection_fn']
+            det_p = det_tp / (det_tp + det_fp) if (det_tp + det_fp) > 0 else 0.0
+            det_r = det_tp / (det_tp + det_fn) if (det_tp + det_fn) > 0 else 0.0
+            det_f1 = 2 * det_p * det_r / (det_p + det_r) if (det_p + det_r) > 0 else 0.0
+
+            track_tp = metrics['tracking_tp']
+            track_fp = metrics['tracking_fp']
+            track_fn = metrics['tracking_fn']
+            track_p = track_tp / (track_tp + track_fp) if (track_tp + track_fp) > 0 else 0.0
+            track_r = track_tp / (track_tp + track_fn) if (track_tp + track_fn) > 0 else 0.0
+            track_f1 = 2 * track_p * track_r / (track_p + track_r) if (track_p + track_r) > 0 else 0.0
+
+            row = f"{thresh:<15.2f}"
+            row += f"{det_p:<15.4f}{track_p:<15.4f}"
+            row += f"{det_r:<15.4f}{track_r:<15.4f}"
+            row += f"{det_f1:<15.4f}{track_f1:<15.4f}"
+            lines.append(row)
+
+        # Average row
+        lines.append("-" * 100)
+        avg_metrics = self._calculate_average_metrics()
+        avg_row = f"{'AVERAGE':<15}"
+        avg_row += f"{avg_metrics['detection']['AP']:<15.4f}{avg_metrics['tracking']['AP']:<15.4f}"
+        avg_row += f"{avg_metrics['detection']['AR']:<15.4f}{avg_metrics['tracking']['AR']:<15.4f}"
+        avg_row += f"{avg_metrics['detection']['AF1']:<15.4f}{avg_metrics['tracking']['AF1']:<15.4f}"
+        lines.append(avg_row)
+        lines.append("=" * 100)
+
+        return "\n".join(lines)
+
     def save_reports(self, output_path: str):
         """Save evaluation reports."""
         report = self.generate_comprehensive_report()
@@ -529,6 +806,19 @@ class TrackingDetectionEvaluator:
             f.write(
                 f"{'DetA (Camera)':<20} {det_det_a:<15.4f} {track_det_a:<15.4f} {det_a_improvement:>+13.1f}% {'All Labels':<15}\n")
             f.write(f"{'Camera IoU Mean':<20} {'-':<15} {camera_iou:<15.4f} {'-':<15} {'All Labels':<15}\n")
+            # Add average metrics to primary table
+            det_ap = metrics.get('detection_AP', 0)
+            track_ap = metrics.get('tracking_AP', 0)
+            ap_improvement = ((track_ap - det_ap) / det_ap * 100) if det_ap > 0 else 0
+
+            det_ar = metrics.get('detection_AR', 0)
+            track_ar = metrics.get('tracking_AR', 0)
+            ar_improvement = ((track_ar - det_ar) / det_ar * 100) if det_ar > 0 else 0
+
+            f.write(
+                f"{'Avg Precision (AP)':<20} {det_ap:<15.4f} {track_ap:<15.4f} {ap_improvement:>+13.1f}% {'Multi-IoU':<15}\n")
+            f.write(
+                f"{'Avg Recall (AR)':<20} {det_ar:<15.4f} {track_ar:<15.4f} {ar_improvement:>+13.1f}% {'Multi-IoU':<15}\n")
             f.write(f"{'HOTA':<20} {'-':<15} {metrics['hota']:<15.4f} {'-':<15} {'All Labels':<15}\n")
             f.write(f"{'MOTA':<20} {'-':<15} {metrics['mota']:<15.4f} {'-':<15} {'All Labels':<15}\n")
 
@@ -563,6 +853,10 @@ class TrackingDetectionEvaluator:
             f.write(
                 f"{'Precision (TP/TP+FP)':<20} {det_precision_ratio:<15.4f} {track_precision_ratio:<15.4f} {precision_ratio_improvement:>+13.1f}% {'All Labels':<15}\n")
 
+            # Add comprehensive threshold summary table
+            threshold_summary = self._format_threshold_summary_table()
+            f.write(threshold_summary)
+
             f.write("\n" + "=" * 80 + "\n")
             f.write("LEGEND:\n")
             f.write("- Detection: Raw network predictions vs ground truth\n")
@@ -576,12 +870,14 @@ class TrackingDetectionEvaluator:
 def evaluate_tracking_sequence(predictions_csv: str, ground_truth_csv: str,
                              tracking_csv: str, output_dir: str,
                              distance_threshold: float = 5.0,
+                             iou_thresholds: list = None,
                              use_cvpr_labels_only: bool = True,
                              **kwargs) -> Tuple[Path, Dict[str, Any]]:
-    """Evaluate tracking sequence with HOTA, MOTA, IoU, DetA, and Precision metrics."""
+    """Evaluate tracking sequence with HOTA, MOTA, IoU, DetA, Precision, Recall, and F1 metrics."""
 
     evaluator = TrackingDetectionEvaluator(
         distance_threshold=distance_threshold,
+        iou_thresholds=iou_thresholds,
         use_cvpr_labels_only=use_cvpr_labels_only
     )
 
