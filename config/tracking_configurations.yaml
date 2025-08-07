@@ -201,7 +201,7 @@ configurations:
   adaptive_assoc_linear:
     description: "Adaptive R in association with linear weighting"
     overrides:
-      create_video: true
+      create_video: false
       use_adaptive_r_in_association: true
       use_adaptive_r_in_update: false
       r_weighting_strategy: "linear"
@@ -234,6 +234,7 @@ default_configurations:
   - high_confidence_relaxed
   - hybrid_low_noise_relaxed
   - hybrid_enhanced
+  - adaptive_assoc_linear
 
 # Baseline is raw predictions (not a tracking configuration)
 baseline_config: "raw_predictions"

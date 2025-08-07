@@ -550,7 +550,7 @@ def offline_tracking(
                         tracking_csv= tracking_csv_path,
                         output_dir= output_paths['logs'],
                         distance_threshold= config['max_distance_threshold'],
-                        iou_threshold= 0.5,  # Default IoU threshold for evaluation
+                        iou_thresholds= config['iou_thresholds'],  # Multiple IoU thresholds
                         max_frames= max_frames,
                         skip_initial_frames=config['min_hits'],
                         max_frame_gap_time=config['max_frame_gap_time'],

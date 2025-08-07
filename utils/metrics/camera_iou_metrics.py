@@ -13,19 +13,20 @@ import cv2
 class CameraIoUCalculator:
     """Calculate IoU between bounding boxes in camera image space."""
 
-    def __init__(self, image_width: int = 960, image_height: int = 540, iou_threshold: float = 0.2):
+    def __init__(self, image_width: int = 960, image_height: int = 540, iou_thresholds: List[float] = None):
         """
         Initialize camera IoU calculator.
 
         Args:
             image_width: Camera image width in pixels
             image_height: Camera image height in pixels
+            iou_thresholds: List of IoU thresholds for evaluation
         """
         self.image_width = image_width
         self.image_height = image_height
 
         self.labels_image_width, self.labels_image_height = 1920, 1080
-        self.iou_threshold = iou_threshold
+        self.iou_thresholds = iou_thresholds if iou_thresholds is not None else [0.3, 0.5]
 
     def _get_scale_factor(self, image_shape: Tuple[int, int]) -> Tuple[float, float]:
         """
@@ -236,17 +237,25 @@ class CameraIoUCalculator:
             'tracking_vs_labels_ious': [] if tracking_df is not None else None,
             'detection_ncles': [],
             'tracking_ncles': [] if tracking_df is not None else None,
-            'detection_tp': 0,
-            'detection_fp': 0,
-            'tracking_tp': 0 if tracking_df is not None else None,
-            'tracking_fp': 0 if tracking_df is not None else None,
             'sample_id': sample_id,
             'debug_info': {
                 'num_predictions': len(predictions_df),
                 'num_labels': len(labels_df),
                 'num_tracks': len(tracking_df) if tracking_df is not None else 0
-            }
+            },
+            'threshold_metrics': {}
         }
+
+        # Initialize metrics for each threshold
+        for threshold in self.iou_thresholds:
+            results['threshold_metrics'][threshold] = {
+                'detection_tp': 0,
+                'detection_fp': 0,
+                'detection_fn': 0,
+                'tracking_tp': 0 if tracking_df is not None else 0,
+                'tracking_fp': 0 if tracking_df is not None else 0,
+                'tracking_fn': 0 if tracking_df is not None else 0
+            }
 
         # Convert labels to camera bounding boxes using consistent scaling
         label_bboxes = []
@@ -255,8 +264,8 @@ class CameraIoUCalculator:
             label_bboxes.append(bbox)
 
         # Track which labels have been matched for TP/FP calculation
-        detection_matched_labels = set()
-        tracking_matched_labels = set()
+        detection_matched_labels = {}
+        tracking_matched_labels = {}
 
         # Evaluate detection predictions vs labels
         for _, pred_row in predictions_df.iterrows():
@@ -275,8 +284,9 @@ class CameraIoUCalculator:
                     max_iou = iou
                     best_match_idx = idx
 
-                # Calculate NCLE for best match
-                if iou >= self.iou_threshold:
+                # Calculate NCLE for best match (use minimum threshold)
+                min_threshold = min(self.iou_thresholds)
+                if iou >= min_threshold:
                     ncle = self.calculate_ncle(pred_bbox, label_bbox, image_shape)
                     min_ncle = min(min_ncle, ncle)
 
@@ -288,12 +298,15 @@ class CameraIoUCalculator:
             else:
                 results['detection_ncles'].append(1.0)  # Max normalized error
 
-            # Count TP/FP
-            if max_iou >= self.iou_threshold and best_match_idx >= 0:
-                results['detection_tp'] += 1
-                detection_matched_labels.add(best_match_idx)
-            else:
-                results['detection_fp'] += 1
+            # Count TP/FP for each threshold
+            for threshold in self.iou_thresholds:
+                if max_iou >= threshold and best_match_idx >= 0:
+                    results['threshold_metrics'][threshold]['detection_tp'] += 1
+                    if threshold not in detection_matched_labels:
+                        detection_matched_labels[threshold] = set()
+                    detection_matched_labels[threshold].add(best_match_idx)
+                else:
+                    results['threshold_metrics'][threshold]['detection_fp'] += 1
 
         # Evaluate tracking predictions vs labels (if available)
         if tracking_df is not None and not tracking_df.empty:
@@ -313,8 +326,9 @@ class CameraIoUCalculator:
                         max_iou = iou
                         best_match_idx = idx
 
-                    # Calculate NCLE for best match
-                    if iou >= self.iou_threshold:
+                    # Calculate NCLE for best match (use minimum threshold)
+                    min_threshold = min(self.iou_thresholds)
+                    if iou >= min_threshold:
                         ncle = self.calculate_ncle(track_bbox, label_bbox, image_shape)
                         min_ncle = min(min_ncle, ncle)
 
@@ -326,12 +340,24 @@ class CameraIoUCalculator:
                 else:
                     results['tracking_ncles'].append(1.0)
 
-                # Count TP/FP
-                if max_iou >= self.iou_threshold and best_match_idx >= 0:
-                    results['tracking_tp'] += 1
-                    tracking_matched_labels.add(best_match_idx)
-                else:
-                    results['tracking_fp'] += 1
+                # Count TP/FP for each threshold
+                for threshold in self.iou_thresholds:
+                    if max_iou >= threshold and best_match_idx >= 0:
+                        results['threshold_metrics'][threshold]['tracking_tp'] += 1
+                        if threshold not in tracking_matched_labels:
+                            tracking_matched_labels[threshold] = set()
+                        tracking_matched_labels[threshold].add(best_match_idx)
+                    else:
+                        results['threshold_metrics'][threshold]['tracking_fp'] += 1
+
+        # Calculate FN for each threshold
+        for threshold in self.iou_thresholds:
+            detection_matched = detection_matched_labels.get(threshold, set())
+            tracking_matched = tracking_matched_labels.get(threshold, set())
+
+            results['threshold_metrics'][threshold]['detection_fn'] = len(label_bboxes) - len(detection_matched)
+            if tracking_df is not None and not tracking_df.empty:
+                results['threshold_metrics'][threshold]['tracking_fn'] = len(label_bboxes) - len(tracking_matched)
 
         return results
 
@@ -413,52 +439,64 @@ class CameraIoUCalculator:
 
         return summary_results
 
-    def calculate_det_a_from_camera_results(self, camera_iou_result: Dict) -> Dict[str, float]:
+    def calculate_det_a_from_camera_results(self, camera_iou_result: Dict, threshold: float = None) -> Dict[str, float]:
         """
-        Calculate DetA metric from camera IoU results.
+        Calculate DetA metric from camera IoU results for a specific threshold.
 
         Args:
             camera_iou_result: Result from evaluate_camera_iou_single_frame
+            threshold: IoU threshold to use (if None, uses median of self.iou_thresholds)
 
         Returns:
             Dictionary with DetA metrics
         """
-        # Extract IoU lists
-        detection_ious = camera_iou_result.get('detection_vs_labels_ious', [])
-        tracking_ious = camera_iou_result.get('tracking_vs_labels_ious', [])
+        if threshold is None:
+            threshold = np.median(self.iou_thresholds)
 
-        # Get counts
-        num_predictions = camera_iou_result['debug_info']['num_predictions']
-        num_tracks = camera_iou_result['debug_info']['num_tracks']
-        num_labels = camera_iou_result['debug_info']['num_labels']
+        # Get threshold-specific metrics if available
+        threshold_metrics = camera_iou_result.get('threshold_metrics', {}).get(threshold, {})
 
-        # Calculate detection metrics
-        if detection_ious:
-            # Count matches above IoU threshold
-            detection_matches = sum(1 for iou in detection_ious if iou >= self.iou_threshold)
-            detection_fp = num_predictions - detection_matches
+        if threshold_metrics:
+            # Use pre-calculated threshold-specific metrics
+            detection_tp = threshold_metrics.get('detection_tp', 0)
+            detection_fp = threshold_metrics.get('detection_fp', 0)
+            detection_fn = threshold_metrics.get('detection_fn', 0)
 
-            # DetA = TP / (TP + FP + FN)
-            # FN = num_labels - TP (ground truth objects not detected)
-            detection_fn = num_labels - detection_matches
-            detection_det_a = detection_matches / (detection_matches + detection_fp + detection_fn) if (
-                    (detection_matches + detection_fp + detection_fn) > 0) else 0.0
+            tracking_tp = threshold_metrics.get('tracking_tp', 0)
+            tracking_fp = threshold_metrics.get('tracking_fp', 0)
+            tracking_fn = threshold_metrics.get('tracking_fn', 0)
+
+            detection_det_a = detection_tp / (detection_tp + detection_fp + detection_fn) if (
+                    (detection_tp + detection_fp + detection_fn) > 0) else 0.0
+
+            tracking_det_a = tracking_tp / (tracking_tp + tracking_fp + tracking_fn) if (
+                    (tracking_tp + tracking_fp + tracking_fn) > 0) else 0.0
         else:
-            # When no detections but ground truth exists: DetA = 0 / (0 + 0 + num_labels) = 0
-            detection_det_a = 0.0
+            # Fallback to IoU list calculation for backward compatibility
+            detection_ious = camera_iou_result.get('detection_vs_labels_ious', [])
+            tracking_ious = camera_iou_result.get('tracking_vs_labels_ious', [])
 
-        # Calculate tracking metrics
-        if tracking_ious:
-            tracking_matches = sum(1 for iou in tracking_ious if iou >= self.iou_threshold)
-            tracking_fp = num_tracks - tracking_matches
+            num_predictions = camera_iou_result['debug_info']['num_predictions']
+            num_tracks = camera_iou_result['debug_info']['num_tracks']
+            num_labels = camera_iou_result['debug_info']['num_labels']
 
-            # DetA = TP / (TP + FP + FN)
-            tracking_fn = num_labels - tracking_matches
-            tracking_det_a = tracking_matches / (tracking_matches + tracking_fp + tracking_fn) if (
-                    (tracking_matches + tracking_fp + tracking_fn) > 0) else 0.0
-        else:
-            # When no tracks but ground truth exists: DetA = 0 / (0 + 0 + num_labels) = 0
-            tracking_det_a = 0.0
+            if detection_ious:
+                detection_matches = sum(1 for iou in detection_ious if iou >= threshold)
+                detection_fp = num_predictions - detection_matches
+                detection_fn = num_labels - detection_matches
+                detection_det_a = detection_matches / (detection_matches + detection_fp + detection_fn) if (
+                        (detection_matches + detection_fp + detection_fn) > 0) else 0.0
+            else:
+                detection_det_a = 0.0
+
+            if tracking_ious:
+                tracking_matches = sum(1 for iou in tracking_ious if iou >= threshold)
+                tracking_fp = num_tracks - tracking_matches
+                tracking_fn = num_labels - tracking_matches
+                tracking_det_a = tracking_matches / (tracking_matches + tracking_fp + tracking_fn) if (
+                        (tracking_matches + tracking_fp + tracking_fn) > 0) else 0.0
+            else:
+                tracking_det_a = 0.0
 
         return {
             'detection_det_a': detection_det_a,
