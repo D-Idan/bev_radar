@@ -106,8 +106,8 @@ class TrackingDetectionEvaluator:
 
             # Apply threshold - for IoU distance, threshold should be (1 - min_iou)
             filtered_distances = distances.copy()
-            median_threshold = self.iou_thresholds[0]
-            iou_distance_threshold = 1.0 - median_threshold
+            min_threshold = min(self.iou_thresholds)
+            iou_distance_threshold = 1.0 - min_threshold
             filtered_distances[filtered_distances > iou_distance_threshold] = np.nan
 
             # Ensure we're using the same ground truth for all metrics
@@ -145,14 +145,18 @@ class TrackingDetectionEvaluator:
         camera_det_a = self.camera_iou_calculator.calculate_det_a_from_camera_results(camera_iou_result)
 
         # Override the placeholder values in frame_metrics with camera-based calculations
+        # Get metrics from the minimum threshold (most permissive)
+        min_threshold = min(self.iou_thresholds)
+        threshold_metrics = camera_iou_result.get('threshold_metrics', {}).get(min_threshold, {})
+
         frame_metrics.update({
             'detection_det_a': camera_det_a['detection_det_a'],
             'tracking_det_a': camera_det_a['tracking_det_a'],
-            # Add new metrics
-            'detection_tp': camera_iou_result.get('detection_tp', 0),
-            'detection_fp': camera_iou_result.get('detection_fp', 0),
-            'tracking_tp': camera_iou_result.get('tracking_tp', 0),
-            'tracking_fp': camera_iou_result.get('tracking_fp', 0),
+            # Add new metrics from threshold-specific results
+            'detection_tp': threshold_metrics.get('detection_tp', 0),
+            'detection_fp': threshold_metrics.get('detection_fp', 0),
+            'tracking_tp': threshold_metrics.get('tracking_tp', 0),
+            'tracking_fp': threshold_metrics.get('tracking_fp', 0),
         })
 
         frame_result = {
@@ -398,15 +402,20 @@ class TrackingDetectionEvaluator:
                 values = [threshold_metrics[t][phase][metric] for t in self.iou_thresholds]
                 avg_metrics[phase][metric] = np.mean(values) if values else 0.0
 
-        detection_tp = camera_iou_summary['detection_tp_fp']['true_positives']
-        detection_fp = camera_iou_summary['detection_tp_fp']['false_positives']
-        tracking_tp = camera_iou_summary['tracking_tp_fp']['true_positives']
-        tracking_fp = camera_iou_summary['tracking_tp_fp']['false_positives']
+        # Get TP/FP from minimum threshold for primary metrics
+        min_threshold = min(self.iou_thresholds)
+        min_threshold_metrics = threshold_metrics[min_threshold]
+        detection_tp = min_threshold_metrics['detection']['tp']
+        detection_fp = min_threshold_metrics['detection']['fp']
+        tracking_tp = min_threshold_metrics['tracking']['tp']
+        tracking_fp = min_threshold_metrics['tracking']['fp']
+
         report = {
             'evaluation_summary': {
                 'frames_evaluated': len(self.frame_results),
                 'distance_threshold_m': self.distance_threshold,
                 'iou_thresholds': self.iou_thresholds,
+                'primary_metrics_threshold': min(self.iou_thresholds),
                 'use_cvpr_labels_only': self.use_cvpr_labels_only
             },
             'threshold_specific_metrics': threshold_metrics,
@@ -504,6 +513,10 @@ class TrackingDetectionEvaluator:
         total_tracking_tp = 0
         total_tracking_fp = 0
 
+        # Initialize per-threshold accumulators
+        threshold_tp_fp = {t: {'detection_tp': 0, 'detection_fp': 0, 'tracking_tp': 0, 'tracking_fp': 0}
+                           for t in self.iou_thresholds}
+
         for result in self.frame_results:
             camera_result = result['camera_iou_results']
             all_detection_ious.extend(camera_result.get('detection_vs_labels_ious', []))
@@ -513,12 +526,20 @@ class TrackingDetectionEvaluator:
                 all_tracking_ious.extend(camera_result['tracking_vs_labels_ious'])
                 all_tracking_ncles.extend(camera_result.get('tracking_ncles', []))
 
-            # Accumulate TP/FP
-            total_detection_tp += camera_result.get('detection_tp', 0)
-            total_detection_fp += camera_result.get('detection_fp', 0)
-            if camera_result.get('tracking_tp') is not None:
-                total_tracking_tp += camera_result.get('tracking_tp', 0)
-                total_tracking_fp += camera_result.get('tracking_fp', 0)
+            # Accumulate TP/FP per threshold
+            for threshold in self.iou_thresholds:
+                threshold_data = camera_result.get('threshold_metrics', {}).get(threshold, {})
+                threshold_tp_fp[threshold]['detection_tp'] += threshold_data.get('detection_tp', 0)
+                threshold_tp_fp[threshold]['detection_fp'] += threshold_data.get('detection_fp', 0)
+                threshold_tp_fp[threshold]['tracking_tp'] += threshold_data.get('tracking_tp', 0)
+                threshold_tp_fp[threshold]['tracking_fp'] += threshold_data.get('tracking_fp', 0)
+
+        # Use minimum threshold for summary
+        min_threshold = min(self.iou_thresholds)
+        total_detection_tp = threshold_tp_fp[min_threshold]['detection_tp']
+        total_detection_fp = threshold_tp_fp[min_threshold]['detection_fp']
+        total_tracking_tp = threshold_tp_fp[min_threshold]['tracking_tp']
+        total_tracking_fp = threshold_tp_fp[min_threshold]['tracking_fp']
 
         return {
             'detection_camera_iou': {
@@ -585,6 +606,11 @@ class TrackingDetectionEvaluator:
             summary = report['evaluation_summary']
             f.write(f"{'Frames Evaluated':<30} {summary['frames_evaluated']:>10}\n")
             f.write(f"{'Distance Threshold (m)':<30} {summary['distance_threshold_m']:>10.1f}\n")
+            f.write(f"{'Distance Threshold (m)':<30} {summary['distance_threshold_m']:>10.1f}\n")
+            f.write(f"{'IoU Thresholds':<30} {str(summary['iou_thresholds']):>10}\n")
+            f.write(
+                f"{'Primary Metrics IoU':<30} {summary.get('primary_metrics_threshold', min(summary['iou_thresholds'])):>10.1f}\n")
+            f.write(f"{'Use CVPR Labels Only':<30} {str(summary['use_cvpr_labels_only']):>10}\n")
             f.write(f"{'Use CVPR Labels Only':<30} {str(summary['use_cvpr_labels_only']):>10}\n")
             f.write(f"{'RA Map Filtering':<30} {'Precision Only':>10}\n")
             f.write(f"{'Bbox Metrics Filtering':<30} {'All Labels':>10}\n\n")
