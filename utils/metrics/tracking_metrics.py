@@ -444,14 +444,19 @@ class TrackingDetectionEvaluator:
                 'num_switches': int(summary['num_switches'].values[0]),
                 'recall': float(summary['recall'].values[0]) if not np.isnan(summary['recall'].values[0]) else 0.0
             },
-            'detection_performance': detection_metrics,
-
+            'detection_performance': {**detection_metrics,
+                                      'avg_precision': avg_metrics['detection']['precision'],
+                                      'avg_recall': avg_metrics['detection']['recall'],
+                                      'avg_f1_score': avg_metrics['detection']['f1_score']},
             'tracking_performance': {**tracking_metrics,
                                      'hota': float(hota),
                                      'mota': float(summary['mota'].values[0]) if not
                                      np.isnan(summary['mota'].values[0]) else 0.0,
                                      'precision_ratio': tracking_tp / (tracking_tp + tracking_fp) if
-                                     (tracking_tp + tracking_fp) > 0 else 0.0},
+                                     (tracking_tp + tracking_fp) > 0 else 0.0,
+                                     'avg_precision': avg_metrics['tracking']['precision'],
+                                     'avg_recall': avg_metrics['tracking']['recall'],
+                                     'avg_f1_score': avg_metrics['tracking']['f1_score']},
             'camera_iou_performance': camera_iou_summary,
             'frame_by_frame_results': self.frame_results
         }

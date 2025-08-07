@@ -31,7 +31,8 @@ class ConfigurationComparisonAnalyzer:
         """Initialize analyzer."""
         self.existing_comparison_data = None
         self.key_metrics = key_metrics or [
-            'hota', 'mota', 'precision', 'det_a', 'precision_ratio'
+            'hota', 'mota', 'precision', 'det_a', 'precision_ratio',
+            'avg_precision', 'avg_recall', 'avg_f1_score'
         ]
         self.distance_metrics = ['mean_euclidean_distance', 'motp', 'ncle']
         self.iou_metrics = ['camera_iou_mean']
@@ -167,11 +168,30 @@ class ConfigurationComparisonAnalyzer:
                 if config_name == baseline_config:
                     # For baseline, use detection performance
                     performance_data = metrics.get('detection_performance', {})
+                    # Check for average metrics
+                    if metric in ['avg_precision', 'avg_recall', 'avg_f1_score']:
+                        avg_metrics = metrics.get('average_metrics', {})
+                        if avg_metrics and 'detection' in avg_metrics:
+                            metric_key = metric.replace('avg_', '')
+                            metric_value = avg_metrics['detection'].get(metric_key, 0.0)
+                        else:
+                            metric_value = performance_data.get(metric, 0.0)
+                    else:
+                        metric_value = performance_data.get(metric, 0.0)
                 else:
                     # For tracking configs, use tracking performance
                     performance_data = metrics.get('tracking_performance', {})
-
-                metric_value = performance_data.get(metric, 0.0)
+                    # Check if this is an average metric that needs special handling
+                    if metric in ['avg_precision', 'avg_recall', 'avg_f1_score']:
+                        # Extract from average_metrics if available
+                        avg_metrics = metrics.get('average_metrics', {})
+                        if avg_metrics and 'tracking' in avg_metrics:
+                            metric_key = metric.replace('avg_', '')  # Remove 'avg_' prefix
+                            metric_value = avg_metrics['tracking'].get(metric_key, 0.0)
+                        else:
+                            metric_value = performance_data.get(metric, 0.0)
+                    else:
+                        metric_value = performance_data.get(metric, 0.0)
 
                 if metric_value == float('inf'):
                     metric_value = None
@@ -231,11 +251,31 @@ class ConfigurationComparisonAnalyzer:
                 if config_name == 'raw_predictions':
                     # For baseline, use detection performance
                     performance_data = metrics.get('detection_performance', {})
+                    # Check for average metrics
+                    if metric in ['avg_precision', 'avg_recall', 'avg_f1_score']:
+                        avg_metrics = metrics.get('average_metrics', {})
+                        if avg_metrics and 'detection' in avg_metrics:
+                            metric_key = metric.replace('avg_', '')
+                            metric_value = avg_metrics['detection'].get(metric_key, 0.0)
+                        else:
+                            metric_value = performance_data.get(metric, 0.0)
+                    else:
+                        metric_value = performance_data.get(metric, 0.0)
                 else:
                     # For tracking configs, use tracking performance
                     performance_data = metrics.get('tracking_performance', {})
+                    # Check if this is an average metric that needs special handling
+                    if metric in ['avg_precision', 'avg_recall', 'avg_f1_score']:
+                        # Extract from average_metrics if available
+                        avg_metrics = metrics.get('average_metrics', {})
+                        if avg_metrics and 'tracking' in avg_metrics:
+                            metric_key = metric.replace('avg_', '')  # Remove 'avg_' prefix
+                            metric_value = avg_metrics['tracking'].get(metric_key, 0.0)
+                        else:
+                            metric_value = performance_data.get(metric, 0.0)
+                    else:
+                        metric_value = performance_data.get(metric, 0.0)
 
-                metric_value = performance_data.get(metric, 0.0)
 
                 if metric_value != float('inf') and metric_value is not None:
                     metric_values.append((config_name, metric_value))
@@ -343,6 +383,12 @@ class ConfigurationComparisonAnalyzer:
                         else:
                             reconstructed['tracking_performance'][metric] = value
 
+                    # Handle average metrics
+                    if metric in ['avg_precision', 'avg_recall', 'avg_f1_score']:
+                        if config_name == 'raw_predictions':
+                            reconstructed['detection_performance'][metric] = value
+                        else:
+                            reconstructed['tracking_performance'][metric] = value
         return reconstructed
 
     def save_comparison_report(self, comparison: ConfigurationComparison, output_dir: Path):
@@ -398,7 +444,12 @@ class ConfigurationComparisonAnalyzer:
             all_metrics = self.key_metrics + self.iou_metrics
 
             for metric in all_metrics:
-                f.write(f"\n{metric.replace('_', ' ').title()}:\n")
+                # Format metric name for display
+                if metric.startswith('avg_'):
+                    display_name = metric.replace('avg_', 'Average ').replace('_', ' ').title()
+                else:
+                    display_name = metric.replace('_', ' ').title()
+                f.write(f"\n{display_name}:\n")
                 f.write("  " + "─" * 80 + "\n")
 
                 metric_data = comparison.metrics_comparison.get(metric, {})

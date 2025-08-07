@@ -16,7 +16,8 @@ class AggregateAnalysisGenerator:
     def __init__(self, key_metrics: Optional[List[str]] = None):
         """Initialize aggregate analysis generator."""
         self.key_metrics = key_metrics or [
-            'hota', 'mota', 'precision', 'det_a', 'precision_ratio'
+            'hota', 'mota', 'precision', 'det_a', 'precision_ratio',
+            'avg_precision', 'avg_recall', 'avg_f1_score'
         ]
         self.distance_metrics = []
 
@@ -274,10 +275,14 @@ class AggregateAnalysisGenerator:
             count = best_data['count']
 
             if metric in self.distance_metrics:
-                f.write(f"{metric.replace('_', ' ').title():<25}: {config_name:<25} "
+                display_name = metric.replace('avg_', 'Average ').replace('_', ' ').title() if metric.startswith(
+                    'avg_') else metric.replace('_', ' ').title()
+                f.write(f"{display_name:<25}: {config_name:<25} "
                         f"({mean_val:.4f} ± {std_val:.4f}m, n={count})\n")
             else:
-                f.write(f"{metric.replace('_', ' ').title():<25}: {config_name:<25} "
+                display_name = metric.replace('avg_', 'Average ').replace('_', ' ').title() if metric.startswith(
+                    'avg_') else metric.replace('_', ' ').title()
+                f.write(f"{display_name:<25}: {config_name:<25} "
                         f"({mean_val:.4f} ± {std_val:.4f}, n={count})\n")
 
         f.write("\n")
