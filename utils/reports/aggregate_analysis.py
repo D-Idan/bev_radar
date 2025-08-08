@@ -16,10 +16,10 @@ class AggregateAnalysisGenerator:
     def __init__(self, key_metrics: Optional[List[str]] = None):
         """Initialize aggregate analysis generator."""
         self.key_metrics = key_metrics or [
-            'hota', 'mota', 'precision', 'det_a', 'precision_ratio',
-            'avg_precision', 'avg_recall', 'avg_f1_score'
+            'hota', 'mota', 'accuracy', 'det_a', 'precision',
+            'avg_precision', 'avg_recall', 'avg_f1_score', 'ncle'
         ]
-        self.distance_metrics = []
+        self.distance_metrics = ['accuracy', 'motp', 'ncle']
 
         # Add IoU metrics
         self.iou_metrics = ['camera_iou_mean']
@@ -274,11 +274,14 @@ class AggregateAnalysisGenerator:
             std_val = best_data['std_value']
             count = best_data['count']
 
-            if metric in self.distance_metrics:
-                display_name = metric.replace('avg_', 'Average ').replace('_', ' ').title() if metric.startswith(
-                    'avg_') else metric.replace('_', ' ').title()
+            if metric == 'accuracy':
+                display_name = "Accuracy (RA) [m]"
                 f.write(f"{display_name:<25}: {config_name:<25} "
-                        f"({mean_val:.4f} ± {std_val:.4f}m, n={count})\n")
+                        f"({mean_val:.4f} ± {std_val:.4f}, n={count})\n")
+            elif metric in ['ncle', 'motp']:
+                display_name = metric.upper() if metric == 'ncle' else metric.upper()
+                f.write(f"{display_name:<25}: {config_name:<25} "
+                        f"({mean_val:.4f} ± {std_val:.4f}, n={count})\n")
             else:
                 display_name = metric.replace('avg_', 'Average ').replace('_', ' ').title() if metric.startswith(
                     'avg_') else metric.replace('_', ' ').title()
@@ -335,7 +338,10 @@ class AggregateAnalysisGenerator:
         all_metrics = self.key_metrics + self.iou_metrics
 
         for metric in all_metrics:
-            f.write(f"\n{metric.replace('_', ' ').title()}:\n")
+            if metric == 'accuracy':
+                f.write(f"\nAccuracy (RA) [m]:\n")
+            else:
+                f.write(f"\n{metric.replace('_', ' ').title()}:\n")
             metric_data = aggregate_data['aggregate_metrics'].get(metric, {})
 
             if not metric_data:
@@ -353,8 +359,10 @@ class AggregateAnalysisGenerator:
                 std_val = data['std']
                 count = data['count']
 
-                if metric in self.distance_metrics:
-                    f.write(f"  {i:2d}. {config_name:<25} {mean_val:.4f} ± {std_val:.4f}m (n={count})\n")
+                if metric == 'accuracy':
+                    f.write(f"  {i:2d}. {config_name:<25} {mean_val:.4f} ± {std_val:.4f} (n={count})\n")
+                elif metric in ['ncle', 'motp']:
+                    f.write(f"  {i:2d}. {config_name:<25} {mean_val:.4f} ± {std_val:.4f} (n={count})\n")
                 else:
                     f.write(f"  {i:2d}. {config_name:<25} {mean_val:.4f} ± {std_val:.4f} (n={count})\n")
 

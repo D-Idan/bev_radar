@@ -31,10 +31,10 @@ class ConfigurationComparisonAnalyzer:
         """Initialize analyzer."""
         self.existing_comparison_data = None
         self.key_metrics = key_metrics or [
-            'hota', 'mota', 'precision', 'det_a', 'precision_ratio',
-            'avg_precision', 'avg_recall', 'avg_f1_score'
+            'hota', 'mota', 'accuracy', 'det_a', 'precision',
+            'avg_precision', 'avg_recall', 'avg_f1_score', 'ncle'
         ]
-        self.distance_metrics = ['mean_euclidean_distance', 'motp', 'ncle']
+        self.distance_metrics = ['accuracy', 'motp', 'ncle']
         self.iou_metrics = ['camera_iou_mean']
         self.count_metrics = ['tp', 'fp']
 
@@ -48,7 +48,8 @@ class ConfigurationComparisonAnalyzer:
         return False
 
     def compare_configurations(self, dataset_name: str, config_results: Dict[str, bool],
-                               dataset_root: Path, baseline_config: str = 'raw_predictions') -> ConfigurationComparison:
+                               dataset_root: Path, baseline_config: str = 'network_output') -> ConfigurationComparison:
+
         """
         Compare tracking configurations against raw predictions baseline.
 
@@ -73,26 +74,27 @@ class ConfigurationComparisonAnalyzer:
             # Add configurations from existing data that are not in current run
             for metric, metric_configs in existing_metrics.items():
                 for config_name, config_data in metric_configs.items():
+                    # Skip 'raw_predictions' if found in existing data
+                    if config_name == 'raw_predictions':
+                        continue
                     if config_name not in config_metrics:
-                        # Reconstruct config metrics from existing comparison
-                        if config_name not in config_metrics:
-                            config_metrics[config_name] = self._reconstruct_config_metrics_from_comparison(config_name,
-                                                                                                           existing_metrics)
+                        config_metrics[config_name] = self._reconstruct_config_metrics_from_comparison(config_name,
+                                                                                                       existing_metrics)
 
-        # Add raw predictions as baseline
-        raw_predictions_metrics = self._collect_raw_predictions_baseline(dataset_root)
-        if raw_predictions_metrics:
-            config_metrics['raw_predictions'] = raw_predictions_metrics
+        # Add network output as baseline (not raw_predictions)
+        network_output_metrics = self._collect_network_output_baseline(dataset_root)
+        if network_output_metrics:
+            config_metrics['network_output'] = network_output_metrics
 
         if not config_metrics:
             raise ValueError("No successful configurations found for comparison")
 
-        # Use raw predictions as baseline
-        baseline_config = 'raw_predictions'
+        # Use network output as baseline
+        baseline_config = 'network_output'
 
         # Perform comparison analysis
         metrics_comparison = self._analyze_metrics_comparison(config_metrics, baseline_config)
-        ranking = self._rank_configurations(config_metrics)
+        ranking = self._rank_configurations(config_metrics, baseline_config)
         overall_ranking = self._calculate_overall_ranking(ranking)
         improvement_summary = self._calculate_improvement_summary(metrics_comparison, baseline_config)
 
@@ -107,8 +109,34 @@ class ConfigurationComparisonAnalyzer:
             improvement_summary=improvement_summary
         )
 
-    def _collect_raw_predictions_baseline(self, dataset_root: Path) -> Optional[Dict]:
-        """Collect metrics from raw predictions (detection performance)."""
+    def _extract_metric_value(self, metrics: Dict, config_name: str, metric: str, is_baseline: bool = False) -> float:
+        """Extract metric value from metrics dictionary with consistent logic."""
+        # Handle NCLE specifically from camera_iou_performance
+        if metric == 'ncle':
+            camera_iou = metrics.get('camera_iou_performance', {})
+            if is_baseline or config_name == 'network_output':
+                return camera_iou.get('detection_ncle', {}).get('mean', 0.0)
+            else:
+                return camera_iou.get('tracking_ncle', {}).get('mean', 0.0)
+
+        if is_baseline or config_name == 'network_output':
+            performance_data = metrics.get('detection_performance', {})
+            source = 'detection'
+        else:
+            performance_data = metrics.get('tracking_performance', {})
+            source = 'tracking'
+
+        # Handle average metrics
+        if metric in ['avg_precision', 'avg_recall', 'avg_f1_score']:
+            avg_metrics = metrics.get('average_metrics', {})
+            if avg_metrics and source in avg_metrics:
+                metric_key = metric.replace('avg_', '')
+                return avg_metrics[source].get(metric_key, 0.0)
+
+        return performance_data.get(metric, 0.0)
+
+    def _collect_network_output_baseline(self, dataset_root: Path) -> Optional[Dict]:
+        """Collect metrics from network output (detection performance)."""
         # Look for evaluation metrics from any tracking configuration
         # (they all evaluate the same raw predictions)
         for config_dir in (dataset_root / 'plots' / 'tracking_output').iterdir():
@@ -165,33 +193,8 @@ class ConfigurationComparisonAnalyzer:
             comparison[metric] = {}
 
             for config_name, metrics in config_metrics.items():
-                if config_name == baseline_config:
-                    # For baseline, use detection performance
-                    performance_data = metrics.get('detection_performance', {})
-                    # Check for average metrics
-                    if metric in ['avg_precision', 'avg_recall', 'avg_f1_score']:
-                        avg_metrics = metrics.get('average_metrics', {})
-                        if avg_metrics and 'detection' in avg_metrics:
-                            metric_key = metric.replace('avg_', '')
-                            metric_value = avg_metrics['detection'].get(metric_key, 0.0)
-                        else:
-                            metric_value = performance_data.get(metric, 0.0)
-                    else:
-                        metric_value = performance_data.get(metric, 0.0)
-                else:
-                    # For tracking configs, use tracking performance
-                    performance_data = metrics.get('tracking_performance', {})
-                    # Check if this is an average metric that needs special handling
-                    if metric in ['avg_precision', 'avg_recall', 'avg_f1_score']:
-                        # Extract from average_metrics if available
-                        avg_metrics = metrics.get('average_metrics', {})
-                        if avg_metrics and 'tracking' in avg_metrics:
-                            metric_key = metric.replace('avg_', '')  # Remove 'avg_' prefix
-                            metric_value = avg_metrics['tracking'].get(metric_key, 0.0)
-                        else:
-                            metric_value = performance_data.get(metric, 0.0)
-                    else:
-                        metric_value = performance_data.get(metric, 0.0)
+                metric_value = self._extract_metric_value(metrics, config_name, metric,
+                                                          is_baseline=(config_name == baseline_config))
 
                 if metric_value == float('inf'):
                     metric_value = None
@@ -237,9 +240,37 @@ class ConfigurationComparisonAnalyzer:
                     improvement = ((metric_value - baseline_value) / baseline_value) * 100
                     comparison['camera_iou_mean'][config_name]['improvement_vs_baseline'] = improvement
 
+            # Process NCLE metric
+            comparison['ncle'] = {}
+
+            for config_name, metrics in config_metrics.items():
+                camera_iou = metrics.get('camera_iou_performance', {})
+
+                if config_name == baseline_config:
+                    # For network output: use detection NCLE
+                    metric_value = camera_iou.get('detection_ncle', {}).get('mean', 0.0)
+                else:
+                    # For tracking configs: use tracking NCLE
+                    metric_value = camera_iou.get('tracking_ncle', {}).get('mean', 0.0)
+
+                comparison['ncle'][config_name] = {
+                    'value': metric_value,
+                    'improvement_vs_baseline': None
+                }
+
+                # Calculate improvement vs baseline (lower is better for NCLE)
+                if config_name != baseline_config:
+                    baseline_value = config_metrics.get(baseline_config, {}).get('camera_iou_performance', {}).get(
+                        'detection_ncle', {}).get('mean', 0.0)
+
+                    if baseline_value > 0 and metric_value > 0:
+                        improvement = ((baseline_value - metric_value) / baseline_value) * 100
+                        comparison['ncle'][config_name]['improvement_vs_baseline'] = improvement
+
         return comparison
 
-    def _rank_configurations(self, config_metrics: Dict[str, Dict]) -> Dict[str, List[str]]:
+    def _rank_configurations(self, config_metrics: Dict[str, Dict],
+                             baseline_config: str="network_output") -> Dict[str, List[str]]:
         """Rank configurations for each metric (including raw predictions baseline)."""
         ranking = {}
 
@@ -248,33 +279,8 @@ class ConfigurationComparisonAnalyzer:
             metric_values = []
 
             for config_name, metrics in config_metrics.items():
-                if config_name == 'raw_predictions':
-                    # For baseline, use detection performance
-                    performance_data = metrics.get('detection_performance', {})
-                    # Check for average metrics
-                    if metric in ['avg_precision', 'avg_recall', 'avg_f1_score']:
-                        avg_metrics = metrics.get('average_metrics', {})
-                        if avg_metrics and 'detection' in avg_metrics:
-                            metric_key = metric.replace('avg_', '')
-                            metric_value = avg_metrics['detection'].get(metric_key, 0.0)
-                        else:
-                            metric_value = performance_data.get(metric, 0.0)
-                    else:
-                        metric_value = performance_data.get(metric, 0.0)
-                else:
-                    # For tracking configs, use tracking performance
-                    performance_data = metrics.get('tracking_performance', {})
-                    # Check if this is an average metric that needs special handling
-                    if metric in ['avg_precision', 'avg_recall', 'avg_f1_score']:
-                        # Extract from average_metrics if available
-                        avg_metrics = metrics.get('average_metrics', {})
-                        if avg_metrics and 'tracking' in avg_metrics:
-                            metric_key = metric.replace('avg_', '')  # Remove 'avg_' prefix
-                            metric_value = avg_metrics['tracking'].get(metric_key, 0.0)
-                        else:
-                            metric_value = performance_data.get(metric, 0.0)
-                    else:
-                        metric_value = performance_data.get(metric, 0.0)
+                metric_value = self._extract_metric_value(metrics, config_name, metric,
+                                                          is_baseline=(config_name == baseline_config))
 
 
                 if metric_value != float('inf') and metric_value is not None:
@@ -282,7 +288,7 @@ class ConfigurationComparisonAnalyzer:
 
             if metric_values:
                 # Handle metrics where lower is better
-                if metric in self.distance_metrics or metric == 'precision':  # Lower is better
+                if metric in self.distance_metrics:  # Lower is better (includes 'accuracy')
                     ranked = sorted(metric_values, key=lambda x: x[1])
                 else:  # Higher is better (including precision_ratio)
                     ranked = sorted(metric_values, key=lambda x: x[1], reverse=True)
@@ -295,7 +301,7 @@ class ConfigurationComparisonAnalyzer:
         for config_name, metrics in config_metrics.items():
             camera_iou = metrics.get('camera_iou_performance', {})
 
-            if config_name == 'raw_predictions':
+            if config_name == 'network_output':
                 metric_value = camera_iou.get('detection_camera_iou', {}).get('mean', 0.0)
             else:
                 metric_value = camera_iou.get('tracking_camera_iou', {}).get('mean', 0.0)
@@ -373,19 +379,19 @@ class ConfigurationComparisonAnalyzer:
                 value = configs[config_name].get('value')
                 if value is not None:
                     if metric == 'camera_iou_mean':
-                        if config_name == 'raw_predictions':
+                        if config_name == 'network_output':
                             reconstructed['camera_iou_performance']['detection_camera_iou'] = {'mean': value}
                         else:
                             reconstructed['camera_iou_performance']['tracking_camera_iou'] = {'mean': value}
                     else:
-                        if config_name == 'raw_predictions':
+                        if config_name == 'network_output':
                             reconstructed['detection_performance'][metric] = value
                         else:
                             reconstructed['tracking_performance'][metric] = value
 
                     # Handle average metrics
                     if metric in ['avg_precision', 'avg_recall', 'avg_f1_score']:
-                        if config_name == 'raw_predictions':
+                        if config_name == 'network_output':
                             reconstructed['detection_performance'][metric] = value
                         else:
                             reconstructed['tracking_performance'][metric] = value
@@ -447,6 +453,8 @@ class ConfigurationComparisonAnalyzer:
                 # Format metric name for display
                 if metric.startswith('avg_'):
                     display_name = metric.replace('avg_', 'Average ').replace('_', ' ').title()
+                elif metric == 'accuracy':
+                    display_name = "Accuracy (RA) [m]"
                 else:
                     display_name = metric.replace('_', ' ').title()
                 f.write(f"\n{display_name}:\n")
@@ -467,9 +475,9 @@ class ConfigurationComparisonAnalyzer:
                     if improvement is not None:
                         improvement_str = f" ({improvement:+.1f}% vs baseline)"
 
-                    if metric in self.distance_metrics:
-                        f.write(f"  {i:2d}. {config_name:<25} {value:.4f}m{improvement_str}\n")
-                    elif 'iou' in metric:
+                    if metric == 'accuracy':
+                        f.write(f"  {i:2d}. {config_name:<25} {value:.4f}{improvement_str}\n")
+                    elif metric in ['ncle', 'motp'] or 'iou' in metric:
                         f.write(f"  {i:2d}. {config_name:<25} {value:.4f}{improvement_str}\n")
                     else:
                         f.write(f"  {i:2d}. {config_name:<25} {value:.4f}{improvement_str}\n")
