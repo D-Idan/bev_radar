@@ -234,6 +234,7 @@ default_configurations:
   - high_confidence_relaxed
   - hybrid_low_noise_relaxed
   - hybrid_enhanced
+  - adaptive_assoc_linear
 
 # Baseline is raw predictions (not a tracking configuration)
 baseline_config: "raw_predictions"
