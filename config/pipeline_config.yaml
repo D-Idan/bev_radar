@@ -78,8 +78,7 @@ tracking:
 
   # Evaluation parameters
   evaluation:
-    max_distance_threshold: 10.0  # Distance threshold for valid associations in evaluation (meters) default: 2.0
-    iou_thresholds: [0.3, 0.5]  # IoU thresholds for evaluation
+    max_distance_threshold: 2.0  # Distance threshold for valid associations in evaluation (meters) default: 2.0
     use_cvpr_labels_only: true  # Use only CVPR updated labels for range-azimuth evaluation (PRECISION ONLY)
     use_camera_fov_filter: true  # Filter detections/tracks to camera FOV during evaluation
     iou_thresholds: [0.3, 0.5]  # List of IoU thresholds for evaluation metrics
