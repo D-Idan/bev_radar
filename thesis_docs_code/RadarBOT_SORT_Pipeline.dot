@@ -1,0 +1,49 @@
+digraph RadarBOT_SORT_Pipeline {
+    rankdir=LR;  // Left-to-right layout
+    node [shape=box, style=filled, fillcolor=lightblue, fontsize=12];
+    edge [arrowsize=1.2];
+
+    // Detection Phase Cluster (Before Algorithm)
+    subgraph cluster_detection {
+        label="Detection Phase (Prior/Input)";
+        style=dashed;
+        color=gray;
+        bgcolor=whitesmoke;
+
+        RawData [label="Raw Radar Data", fillcolor=palegreen];
+        DeepLearning [label="Deep Learning Module\n(T_FFTRadNet ViT)", fillcolor=lightyellow];
+        Detections [label="Neural Network Detections\n+ Confidence Scores", fillcolor=lavender];
+        
+        RawData -> DeepLearning;
+        DeepLearning -> Detections;
+    }
+
+    // Tracking Phase Cluster (Our Work)
+    subgraph cluster_tracking {
+        label="Tracking Phase (Our Contribution)";
+        style=dashed;
+        color=gray;
+        bgcolor=lightcyan;
+
+        Tracker [label="RadarBOT-SORT Tracker", fillcolor=salmon];
+        EnhancedSORT [label="Enhanced SORT Tracking", shape=plaintext, fillcolor=none, fontcolor=gray];  // Invisible node for branching
+        
+        // Branches for contributions
+        Confidence [label="Confidence Integration", fillcolor=lightcoral];
+        AdaptiveR [label="Adaptive R Matrix\nin Kalman Filter", fillcolor=lightcoral];
+        RadarFeatures [label="Radar-Specific Features", fillcolor=lightcoral];
+        StatisticalAssociation [label="Statistical Association", fillcolor=lightcoral];
+        
+        Tracker -> EnhancedSORT [style=invis];  // Invisible edge to position branches
+        EnhancedSORT -> Confidence [dir=none, style=dotted];
+        EnhancedSORT -> AdaptiveR [dir=none, style=dotted];
+        EnhancedSORT -> RadarFeatures [dir=none, style=dotted];
+        EnhancedSORT -> StatisticalAssociation [dir=none, style=dotted];
+        
+        FinalTracks [label="Final Object Tracks", fillcolor=palegreen];
+        Tracker -> FinalTracks;
+    }
+
+    // Connect Detection to Tracking
+    Detections -> Tracker [label="Input to Our Work", fontcolor=blue, color=blue];
+}

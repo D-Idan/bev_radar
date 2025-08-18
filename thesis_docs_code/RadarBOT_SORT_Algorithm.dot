@@ -1,0 +1,70 @@
+digraph RadarBOT_SORT_Algorithm {
+    rankdir=LR;  // Left-to-right layout
+    node [shape=box, style=filled, fillcolor=lightblue, fontsize=12];
+    edge [arrowsize=1.2];
+
+    // Inputs
+    PredictedTracks [label="Predicted Tracks\nX_{k-1}, P_{k-1}", fillcolor=palegreen];
+    Detections [label="Detections\nD_k = (x_k, y_k)", fillcolor=palegreen];
+
+    // Cost Matrix Calculation with Branches (Emphasize Contributions)
+    CostMatrix [label="Cost Matrix\nC = R Stocks + Sims", fillcolor=lightyellow];
+    
+    Euclidean [label="Euclidean\n|d_i - r_j|", fillcolor=lightcoral];  // Contribution: Basic, but extended
+    ConfWeighted [label="Conf-Weighted\n(1/conf) * |d_i - r_j|", fillcolor=lightcoral];  // Contribution: Confidence Integration
+    Mahalanobis [label="Mahalanobis\n(H*x - z)^T * S^{-1} * (H*x - z)", fillcolor=lightcoral];  // Contribution: Statistical Association
+    Hybrid [label="Hybrid\na*d + (1-a)*conf term", fillcolor=lightcoral];  // Contribution: Combining Confidence and Stats
+
+    // Connect branches to Cost Matrix
+    PredictedTracks -> CostMatrix;
+    Detections -> CostMatrix;
+    CostMatrix -> Euclidean [dir=back, style=dotted, label="Association Strategies (Contributions)"];
+    CostMatrix -> ConfWeighted [dir=back, style=dotted];
+    CostMatrix -> Mahalanobis [dir=back, style=dotted];
+    CostMatrix -> Hybrid [dir=back, style=dotted];
+
+    // Hungarian Assignment
+    Hungarian [label="Hungarian\nOptimal Assignment\nmin sum C_{i,j}", fillcolor=lightyellow];
+    CostMatrix -> Hungarian;
+
+    // Gating Decision
+    Gating [label="Gating\nC_u ≤ τ ?", shape=diamond, fillcolor=lightyellow];
+    Hungarian -> Gating;
+
+    // Pass Branch
+    ValidAssoc [label="Valid Association", fillcolor=lightgreen];
+    KalmanUpdate [label="Kalman Update\nx_k, P_k", fillcolor=lightcoral];  // Contribution: Adaptive R Matrix
+    Gating -> ValidAssoc [label="Pass"];
+    ValidAssoc -> KalmanUpdate;
+
+    // Fail Branch
+    InvalidAssoc [label="Invalid Association", fillcolor=salmon];
+    TrackAging [label="Track Aging\n& Termination", fillcolor=salmon];
+    Gating -> InvalidAssoc [label="Fail"];
+    InvalidAssoc -> TrackAging;
+
+    // Unmatched Detections
+    UnmatchedDet [label="Unmatched Detection", fillcolor=lightyellow];
+    NewTrack [label="New Track Init\nx_new = [x0,y0,0,0]", fillcolor=lightcoral];  // Contribution: Radar-Specific Features
+    Gating -> UnmatchedDet [dir=none, style=dotted];  // Implicit branch
+    UnmatchedDet -> NewTrack;
+
+    // Cluster for Contributions
+    subgraph cluster_contributions {
+        label="Key Contributions";
+        style=dashed;
+        color=gray;
+        bgcolor=lightcyan;
+        
+        Confidence [label="Confidence Integration", fillcolor=lightcoral];
+        AdaptiveR [label="Adaptive R Matrix\nin Kalman Filter", fillcolor=lightcoral];
+        RadarFeatures [label="Radar-Specific Features", fillcolor=lightcoral];
+        StatisticalAssociation [label="Statistical Association", fillcolor=lightcoral];
+        
+        // Invisible connections to position
+        ConfWeighted -> Confidence [style=invis];
+        Mahalanobis -> StatisticalAssociation [style=invis];
+        KalmanUpdate -> AdaptiveR [style=invis];
+        NewTrack -> RadarFeatures [style=invis];
+    }
+}
