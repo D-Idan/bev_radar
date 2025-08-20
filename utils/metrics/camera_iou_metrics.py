@@ -309,56 +309,67 @@ class CameraIoUCalculator:
                     results['threshold_metrics'][threshold]['detection_fp'] += 1
 
         # Evaluate tracking predictions vs labels (if available)
-        if tracking_df is not None and not tracking_df.empty:
-            for track_idx, track_row in tracking_df.iterrows():
-                track_bbox = self.range_azimuth_to_camera_bbox_consistent(
-                    track_row['range_m'], track_row['azimuth_deg'], image_shape
-                )
+        if tracking_df is not None:
+            if not tracking_df.empty:
+                # Process tracks normally when they exist
+                for track_idx, track_row in tracking_df.iterrows():
+                    track_bbox = self.range_azimuth_to_camera_bbox_consistent(
+                        track_row['range_m'], track_row['azimuth_deg'], image_shape
+                    )
 
-                # Calculate IoU with all labels and take maximum
-                max_iou = 0.0
-                best_match_idx = -1
-                min_ncle = float('inf')
+                    # Calculate IoU with all labels and take maximum
+                    max_iou = 0.0
+                    best_match_idx = -1
+                    min_ncle = float('inf')
 
-                for idx, label_bbox in enumerate(label_bboxes):
-                    iou = self.calculate_bbox_iou(track_bbox, label_bbox)
-                    if iou > max_iou:
-                        max_iou = iou
-                        best_match_idx = idx
+                    for idx, label_bbox in enumerate(label_bboxes):
+                        iou = self.calculate_bbox_iou(track_bbox, label_bbox)
+                        if iou > max_iou:
+                            max_iou = iou
+                            best_match_idx = idx
 
-                    # Calculate NCLE for best match (use minimum threshold)
-                    min_threshold = min(self.iou_thresholds)
-                    if iou >= min_threshold:
-                        ncle = self.calculate_ncle(track_bbox, label_bbox, image_shape)
-                        min_ncle = min(min_ncle, ncle)
+                        # Calculate NCLE for best match (use minimum threshold)
+                        min_threshold = min(self.iou_thresholds)
+                        if iou >= min_threshold:
+                            ncle = self.calculate_ncle(track_bbox, label_bbox, image_shape)
+                            min_ncle = min(min_ncle, ncle)
 
-                results['tracking_vs_labels_ious'].append(max_iou)
+                    results['tracking_vs_labels_ious'].append(max_iou)
 
-                # Add NCLE
-                if min_ncle < float('inf'):
-                    results['tracking_ncles'].append(min_ncle)
-                else:
-                    results['tracking_ncles'].append(1.0)
-
-                # Count TP/FP for each threshold
-                for threshold in self.iou_thresholds:
-                    if max_iou >= threshold and best_match_idx >= 0:
-                        results['threshold_metrics'][threshold]['tracking_tp'] += 1
-                        if threshold not in tracking_matched_labels:
-                            tracking_matched_labels[threshold] = set()
-                        tracking_matched_labels[threshold].add(best_match_idx)
+                    # Add NCLE
+                    if min_ncle < float('inf'):
+                        results['tracking_ncles'].append(min_ncle)
                     else:
-                        results['threshold_metrics'][threshold]['tracking_fp'] += 1
+                        results['tracking_ncles'].append(1.0)
+
+                    # Count TP/FP for each threshold
+                    for threshold in self.iou_thresholds:
+                        if max_iou >= threshold and best_match_idx >= 0:
+                            results['threshold_metrics'][threshold]['tracking_tp'] += 1
+                            if threshold not in tracking_matched_labels:
+                                tracking_matched_labels[threshold] = set()
+                            tracking_matched_labels[threshold].add(best_match_idx)
+                        else:
+                            results['threshold_metrics'][threshold]['tracking_fp'] += 1
+            else:
+                # CRITICAL FIX: When tracking_df is empty (no tracks for this frame),
+                # we still need to initialize the metrics properly
+                # All labels become false negatives since there are no tracks to match them
+                pass  # The FN calculation below will handle this case
 
         # Calculate FN for each threshold
         for threshold in self.iou_thresholds:
             detection_matched = detection_matched_labels.get(threshold, set())
             tracking_matched = tracking_matched_labels.get(threshold, set())
 
+            # Detection FN: labels that weren't matched by any detection
             results['threshold_metrics'][threshold]['detection_fn'] = len(label_bboxes) - len(detection_matched)
-            if tracking_df is not None and not tracking_df.empty:
-                results['threshold_metrics'][threshold]['tracking_fn'] = len(label_bboxes) - len(tracking_matched)
 
+            # Tracking FN: labels that weren't matched by any track
+            # This should be calculated regardless of whether tracking_df is empty
+            # If tracking_df is empty, tracking_matched will be empty, so all labels are FN
+            if tracking_df is not None:
+                results['threshold_metrics'][threshold]['tracking_fn'] = len(label_bboxes) - len(tracking_matched)
         return results
 
     def evaluate_camera_iou_sequence(self, predictions_csv: str, labels_csv: str,
