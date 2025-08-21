@@ -10,9 +10,39 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from radar_tracking import Detection, Track
 
-from utils.radar_camera_relation import is_within_radar_coverage
+from utils.radar_camera_relation import is_within_radar_coverage, is_within_camera_radar_coverage
 from visualization_config import VisualizationConfig as VizConfig
 
+# Visualization configuration
+VIZ_CONFIG = {
+    'markers': {
+        'labels': {'marker': 'x', 'size': 100, 'alpha': 0.8},
+        'detections': {'marker': 'o', 'size': 60, 'alpha': 0.6, 'facecolors': 'none', 'edgecolors': 'black'},
+        'corrector': {'marker': '^', 'size': 60, 'linewidth': 1.5},
+        'prediction': {'marker': '^', 'size': 60, 'linewidth': 1.5}
+    },
+    'colors': {
+        'labels': 'black',
+        'detections': 'black',
+        'tracks': ['#ff6b35', '#f7931e', '#ffd23f', '#06ffa5',
+                   '#b19cd9', '#ff9ff3', '#54a0ff', '#5f27cd',
+                   '#00d2d3', '#ff9f43', '#ff6348', '#c44569',
+                   '#f8b500', '#786fa6', '#f19066', '#4b7bec']
+    },
+    'plot': {
+        'figure_size': (16, 12),
+        'dpi': 200,
+        'elev': 20,
+        'azim': 45,
+        'segment_duration': 20.0
+    },
+    'text': {
+        'track_id_size': 10,
+        'axis_label_size': 12,
+        'title_size': 14,
+        'legend_size': 10
+    }
+}
 
 def get_visualization_config():
     """
@@ -919,6 +949,8 @@ def visualize_all_frames_3d_overview(
         frame_times: List[Tuple[int, float]],
         output_dir: str,
         radar_config: Optional[dict] = None,
+        show_predictions: bool = False,
+        show_labels: bool = False,
 
 ):
     """Create 3D visualization using actual stored prediction and update states."""
@@ -950,8 +982,7 @@ def visualize_all_frames_3d_overview(
         for track in frame_tracks:
             unique_track_ids.add(track.id)
     num_tracks = len(unique_track_ids)
-    color_map = cm.get_cmap('tab10', min(num_tracks + 1, 10))
-    track_colors = {track_id: mcolors.to_hex(color_map(i % 10))
+    track_colors = {track_id: VIZ_CONFIG['colors']['tracks'][i % len(VIZ_CONFIG['colors']['tracks'])]
                     for i, track_id in enumerate(unique_track_ids)}
 
     # Store track data with actual stored states
@@ -962,12 +993,13 @@ def visualize_all_frames_3d_overview(
         timestamp = frame_to_time.get(frame_id, frame_id)
 
         # Labels
-        for gt in all_ground_truth[frame_idx]:
-            az_deg = np.degrees(gt.azimuth_rad)
-            if is_within_radar_coverage(az_deg, gt.range_m, radar_config):
-                all_gt_times.append(timestamp)
-                all_gt_az.append(az_deg)
-                all_gt_rng.append(gt.range_m)
+        if show_labels:
+            for gt in all_ground_truth[frame_idx]:
+                az_deg = np.degrees(gt.azimuth_rad)
+                if is_within_radar_coverage(az_deg, gt.range_m, radar_config):
+                    all_gt_times.append(timestamp)
+                    all_gt_az.append(az_deg)
+                    all_gt_rng.append(gt.range_m)
 
         # Detections
         for det in all_detections[frame_idx]:
@@ -997,26 +1029,39 @@ def visualize_all_frames_3d_overview(
         for timestamp, track, frame_id in track_history:
             range_m, azimuth_rad = track.kalman_polar_position
             azimuth_deg = np.degrees(azimuth_rad)
-            all_track_data[track_id]['update_states'].append((timestamp, azimuth_deg, range_m))
-            all_track_data[track_id]['timestamps'].append(timestamp)
+            if is_within_camera_radar_coverage(azimuth_deg, range_m, radar_config):
+                all_track_data[track_id]['update_states'].append((timestamp, azimuth_deg, range_m))
+                all_track_data[track_id]['timestamps'].append(timestamp)
 
     # Function to create a 3D plot for a time segment
     def create_3d_plot(gt_times, gt_az, gt_rng, det_times, det_az, det_rng, track_data,
-                       time_start, time_end, filename, title_suffix=""):
-        fig = plt.figure(figsize=(16, 12))
+                       time_start, time_end, filename, title_suffix="", show_predictions=False, show_labels=False):
+        fig = plt.figure(figsize=VIZ_CONFIG['plot']['figure_size'])
         ax = fig.add_subplot(111, projection='3d')
 
         # Plot Labels and detections
-        if gt_times:
-            ax.scatter(gt_times, gt_az, gt_rng, c='green', marker='x', s=40,
-                       alpha=0.7, label='Labels')
+        if show_labels and gt_times:
+            ax.scatter(gt_times, gt_az, gt_rng,
+                       c=VIZ_CONFIG['colors']['labels'],
+                       marker=VIZ_CONFIG['markers']['labels']['marker'],
+                       s=VIZ_CONFIG['markers']['labels']['size'],
+                       alpha=VIZ_CONFIG['markers']['labels']['alpha'],
+                       label='Labels')
         if det_times:
-            ax.scatter(det_times, det_az, det_rng, c='blue', s=15,
-                       alpha=0.5, label='Detections')
+            ax.scatter(det_times, det_az, det_rng,
+                       facecolors=VIZ_CONFIG['markers']['detections']['facecolors'],
+                       edgecolors=VIZ_CONFIG['markers']['detections']['edgecolors'],
+                       marker=VIZ_CONFIG['markers']['detections']['marker'],
+                       s=VIZ_CONFIG['markers']['detections']['size'],
+                       alpha=VIZ_CONFIG['markers']['detections']['alpha'],
+                       linewidths=1.5,
+                       label='Network Detections')
 
         # Plot tracks with stored states - simplified legend
-        legend_entries = ['Labels', 'Detections']
-        has_updates = False
+        legend_entries = ['Network Detections']
+        if show_labels and gt_times:
+            legend_entries.insert(0, 'Labels')
+        has_corrector = False
         has_predictions = False
 
         for track_id, data in track_data.items():
@@ -1025,43 +1070,52 @@ def visualize_all_frames_3d_overview(
 
             color = track_colors[track_id]
 
-            # Plot update states (solid line with circles)
+            # Plot corrector states (solid line with circles)
             times, azimuths, ranges = zip(*data['update_states'])
-            # Only add to legend for first track
-            update_label = 'Track Updates' if not has_updates else ""
-            ax.plot(times, azimuths, ranges, color=color, linewidth=2.5, alpha=0.9,
-                    label=update_label, marker='o', markersize=4)
-            has_updates = True
+            corrector_label = 'Corrector (each color unique track)' if not has_corrector else ""
+            ax.plot(times, azimuths, ranges,
+                    color=color,
+                    linewidth=VIZ_CONFIG['markers']['corrector']['linewidth'],
+                    alpha=0.9,
+                    label=corrector_label,
+                    marker=VIZ_CONFIG['markers']['corrector']['marker'],
+                    markersize=VIZ_CONFIG['markers']['corrector']['size'] / 10)
+            has_corrector = True
 
-            # Plot prediction states (dashed line with triangles)
-            if data['prediction_states']:
+            # Plot prediction states if enabled
+            if show_predictions and data['prediction_states']:
                 pred_times, pred_azimuths, pred_ranges = zip(*data['prediction_states'])
-                # Only add to legend for first track
                 pred_label = 'Track Predictions' if not has_predictions else ""
                 ax.plot(pred_times, pred_azimuths, pred_ranges,
-                        color=color, linewidth=1.5, alpha=0.6, linestyle='--',
-                        marker='^', markersize=3, label=pred_label)
+                        color=color,
+                        linewidth=VIZ_CONFIG['markers']['prediction']['linewidth'],
+                        alpha=0.6,
+                        linestyle='--',
+                        marker=VIZ_CONFIG['markers']['prediction']['marker'],
+                        markersize=VIZ_CONFIG['markers']['prediction']['size'] / 10,
+                        label=pred_label)
                 has_predictions = True
 
             # Add track ID at start
             if times:
                 ax.text(times[0], azimuths[0], ranges[0], f"T{track_id}",
-                        color=color, fontsize=8, fontweight='bold')
+                        color='black', fontsize=VIZ_CONFIG['text']['track_id_size'],
+                        fontweight='bold', bbox=dict(boxstyle='round,pad=0.3',
+                                                     facecolor=color, alpha=0.8),
+                        zorder=1000)
 
         # Add legend entries for what we actually have
-        if has_updates:
-            legend_entries.append('Track Updates')
-        if has_predictions:
+        if has_corrector:
+            legend_entries.append('Corrector (each color unique track)')
+        if has_predictions and show_predictions:
             legend_entries.append('Track Predictions')
 
-        ax.set_xlabel('Time (seconds)', fontsize=12)
-        ax.set_ylabel('Azimuth (degrees)', fontsize=12)
-        ax.set_zlabel('Range (meters)', fontsize=12)
-        ax.set_title(f'3D Radar Tracking: Stored Prediction vs Update States{title_suffix}\n'
-                     f'Time: {time_start:.1f}s - {time_end:.1f}s\n'
-                     'Solid: update states, Dashed: prediction states\n'
-                     'Each color represents a unique track ID',
-                     fontsize=14)
+        ax.set_xlabel('Time (seconds)', fontsize=VIZ_CONFIG['text']['axis_label_size'])
+        ax.set_ylabel('Azimuth (degrees)', fontsize=VIZ_CONFIG['text']['axis_label_size'])
+        ax.set_zlabel('Range (meters)', fontsize=VIZ_CONFIG['text']['axis_label_size'])
+        ax.set_title(f'3D Radar Tracking{title_suffix}\n'
+                     f'Time: {time_start:.1f}s - {time_end:.1f}s',
+                     fontsize=VIZ_CONFIG['text']['title_size'])
 
         # Clean legend with only the entries we want
         handles, labels = ax.get_legend_handles_labels()
@@ -1074,16 +1128,22 @@ def visualize_all_frames_3d_overview(
                 filtered_labels.append(label)
 
         if filtered_handles:
-            ax.legend(filtered_handles, filtered_labels, loc='best', fontsize=10)
+            legend = ax.legend(filtered_handles, filtered_labels, loc='best',
+                               fontsize=VIZ_CONFIG['text']['legend_size'])
 
-        ax.view_init(elev=20, azim=45)
+            # Set corrector legend handle to black
+            for handle, label in zip(legend.legend_handles, filtered_labels):
+                if 'Corrector' in label:
+                    handle.set_color('black')
+
+        ax.view_init(elev=VIZ_CONFIG['plot']['elev'], azim=VIZ_CONFIG['plot']['azim'])
 
         plt.tight_layout()
-        plt.savefig(filename, dpi=200, bbox_inches='tight')
+        plt.savefig(filename, dpi=VIZ_CONFIG['plot']['dpi'], bbox_inches='tight')
         plt.close()
 
     # Create 20-second segments
-    segment_duration = 20.0
+    segment_duration = VIZ_CONFIG['plot']['segment_duration']
     num_segments = int(np.ceil(total_duration / segment_duration))
 
     for segment in range(num_segments):
@@ -1122,7 +1182,7 @@ def visualize_all_frames_3d_overview(
         create_3d_plot(segment_gt_times, segment_gt_az, segment_gt_rng,
                        segment_det_times, segment_det_az, segment_det_rng,
                        segment_track_data, segment_start, segment_end, filename,
-                       f" (Segment {segment + 1}/{num_segments})")
+                       f" (Segment {segment + 1}/{num_segments})", show_predictions, show_labels)
 
     # Create full scenario plot and save to summary folder
     summary_folder = Path(output_dir).parent / "summary"
@@ -1132,7 +1192,7 @@ def visualize_all_frames_3d_overview(
     create_3d_plot(all_gt_times, all_gt_az, all_gt_rng,
                    all_det_times, all_det_az, all_det_rng,
                    all_track_data, min_time, max_time, full_scenario_filename,
-                   f" (Full Scenario - {total_duration:.1f}s)")
+                   f" (Full Scenario - {total_duration:.1f}s)", show_predictions, show_labels)
 
     print(f"Created {num_segments} 3D segments of {segment_duration}s each")
     print(f"Segments saved to: {subfolder_3d}")
@@ -1398,4 +1458,3 @@ def visualize_timing_analysis(frame_times: List[Tuple[int, float]],
     plt.tight_layout()
     plt.savefig(Path(output_dir) / 'frame_timestamps_timeline.png', dpi=150)
     plt.close()
-

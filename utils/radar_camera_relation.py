@@ -43,3 +43,12 @@ def is_within_radar_coverage(azimuth_deg, range_m, radar_config):
 
     return (range_m <= max_range and
             min_azimuth <= azimuth_deg <= max_azimuth)
+
+def is_within_camera_radar_coverage(azimuth_deg, range_m, radar_config):
+    """Check if a point is within radar coverage boundaries."""
+    max_range = 103.0
+    min_azimuth = -60.0
+    max_azimuth = 60.0
+
+    return (range_m <= max_range and
+            min_azimuth <= azimuth_deg <= max_azimuth)
