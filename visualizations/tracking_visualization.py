@@ -184,6 +184,9 @@ class TrackingVisualizationTool:
 
         # Ground truth labels (green) - draw first so they appear behind
         for _, row in labels_df.iterrows():
+            # Skip rows with NaN pixel coordinates
+            if pd.isna(row['x1_pix']) or pd.isna(row['y1_pix']) or pd.isna(row['x2_pix']) or pd.isna(row['y2_pix']):
+                continue
             x1, y1, x2, y2 = int(row['x1_pix']), int(row['y1_pix']), int(row['x2_pix']), int(row['y2_pix'])
             label_id = int(row['ID'])
 
@@ -191,9 +194,9 @@ class TrackingVisualizationTool:
             bbox = (x1, y1, x2, y2)
             image = draw_simple_bbox(image, bbox, (0, 255, 0), 2)  # Green color
 
-            # # Add label ID text
-            # cv2.putText(image, f"GT:{label_id}", (x1, y1 - 5),
-            #             cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+            # Add label ID text
+            cv2.putText(image, f"BS:{label_id}", (x1, y1 - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
 
         # Network predictions (blue) - now with larger boxes (same size as old labels)
         for _, row in predictions_df.iterrows():
@@ -423,17 +426,23 @@ def create_tracking_video(data_dir: Path, output_dir: Path, labels_csv: str,
         if not all(p.exists() for p in [image_path, rd_path, ra_path]):
             continue
 
-        # Create enhanced visualization
-        fig = viz_tool.create_simplified_visualization(
-            sample_id, labels_df, predictions_df, tracking_df,
-            image_path, ra_path
-        )
+        try:
+            # Create enhanced visualization
+            fig = viz_tool.create_simplified_visualization(
+                sample_id, labels_df, predictions_df, tracking_df,
+                image_path, ra_path
+            )
 
-        # Save frame with higher DPI for better quality
-        frame_path = frames_dir / f"frame_{i:06d}.png"
-        fig.savefig(frame_path, dpi=120, bbox_inches='tight', facecolor='white')
-        plt.close(fig)
-        created_frames.append(frame_path)
+            # Save frame with higher DPI for better quality
+            frame_path = frames_dir / f"frame_{i:06d}.png"
+            fig.savefig(frame_path, dpi=90, bbox_inches='tight', facecolor='white')
+            plt.close(fig)
+            created_frames.append(frame_path)
+        except Exception as e:
+            print(f"Error processing frame {i} (sample {sample_id}): {str(e)}")
+            import traceback
+            traceback.print_exc()
+            continue
 
         if i % 10 == 0:
             print(f"Created enhanced frame {i+1}/{len(sample_ids)}")
@@ -445,10 +454,9 @@ def create_tracking_video(data_dir: Path, output_dir: Path, labels_csv: str,
         cmd = [
             "ffmpeg", "-y", "-framerate", "5",
             "-i", str(frames_dir / "frame_%06d.png"),
-            "-b:v", "600k",
             "-vf", "scale=2160:-2",
-            "-preset", "fast",
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-b:v", "600k", "-preset", "fast",
             str(video_path)
         ]
         subprocess.run(cmd, check=True, capture_output=True)
@@ -459,8 +467,8 @@ def create_tracking_video(data_dir: Path, output_dir: Path, labels_csv: str,
             frame.unlink()
         frames_dir.rmdir()
 
-    # except subprocess.CalledProcessError as e:
-    #     print("Error:", e.stderr)
+    except subprocess.CalledProcessError as e:
+        print("Error:", e.stderr)
     except (subprocess.CalledProcessError, FileNotFoundError):
         print(f"FFmpeg not available. Enhanced frame images saved in: {frames_dir}")
         video_path = frames_dir
