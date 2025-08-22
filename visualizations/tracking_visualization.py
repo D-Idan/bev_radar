@@ -70,7 +70,8 @@ class TrackingVisualizationTool:
 
     def load_data(self, labels_csv: str, predictions_csv: str, tracking_csv: Optional[str] = None):
         """Load all data sources."""
-        labels_df = pd.read_csv(labels_csv, sep='\t|,', engine='python')
+        new__labels_path = Path(labels_csv).with_name('car_labels.csv')
+        labels_df = pd.read_csv(new__labels_path)
         predictions_df = pd.read_csv(predictions_csv)
         tracking_df = pd.read_csv(tracking_csv) if tracking_csv is not None else None
         return labels_df, predictions_df, tracking_df
@@ -106,7 +107,9 @@ class TrackingVisualizationTool:
 
         # Panel 1: Camera image (left side)
         if image is not None:
-            image_viz = self._annotate_camera_image_simplified(image.copy(), sample_predictions, sample_tracks)
+            sample_labels = labels_df[labels_df['numSample'] == sample_id]
+            image_viz = self._annotate_camera_image_simplified(image.copy(), sample_labels, sample_predictions,
+                                                               sample_tracks)
             axs[0].imshow(image_viz)
         axs[0].set_title('Camera View', fontweight='bold', fontsize=14)
         axs[0].axis('off')
@@ -114,9 +117,11 @@ class TrackingVisualizationTool:
         # Add legend to camera view
         from matplotlib.patches import Rectangle
         camera_legend = [
+            Rectangle((0, 0), 1, 1, facecolor='none', edgecolor='green', linewidth=2, alpha=0.7,
+                      label='BOTSort'),
             Rectangle((0, 0), 1, 1, facecolor='none', edgecolor='blue', linewidth=2, alpha=0.7,
                       label='Network Detection'),
-            Rectangle((0, 0), 1, 1, facecolor='none', edgecolor='red', linewidth=2, alpha=0.7,
+            Rectangle((0, 0), 1, 1, facecolor='red', edgecolor='red', linewidth=1, alpha=0.3,
                       label='Corrector')
         ]
         axs[0].legend(handles=camera_legend, loc='upper right', fontsize=12)
@@ -130,13 +135,23 @@ class TrackingVisualizationTool:
 
         return fig
 
-    def _annotate_camera_image_simplified(self, image: np.ndarray, predictions_df: pd.DataFrame,
+    def _annotate_camera_image_simplified(self, image: np.ndarray, labels_df: pd.DataFrame,
+                                          predictions_df: pd.DataFrame,
                                           tracks_df: Optional[pd.DataFrame]) -> np.ndarray:
-        """Annotate camera image with adjusted box sizes (no labels)."""
+        """Annotate camera image with labels, predictions, and tracks."""
 
-        def draw_simple_bbox(img, bbox, color, thickness=2):
+        def draw_simple_bbox(img, bbox, color, thickness=2, fill_color=None, fill_alpha=0.3):
             """Draw bounding box without text labels."""
             x1, y1, x2, y2 = map(int, bbox)
+
+            # Draw filled rectangle if fill_color is provided
+            if fill_color is not None:
+                # Create overlay for alpha blending
+                overlay = img.copy()
+                cv2.rectangle(overlay, (x1, y1), (x2, y2), fill_color, -1)
+                cv2.addWeighted(overlay, fill_alpha, img, 1 - fill_alpha, 0, img)
+
+            # Draw border
             cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
             return img
 
@@ -167,6 +182,19 @@ class TrackingVisualizationTool:
 
             return img
 
+        # Ground truth labels (green) - draw first so they appear behind
+        for _, row in labels_df.iterrows():
+            x1, y1, x2, y2 = int(row['x1_pix']), int(row['y1_pix']), int(row['x2_pix']), int(row['y2_pix'])
+            label_id = int(row['ID'])
+
+            # Draw green bounding box
+            bbox = (x1, y1, x2, y2)
+            image = draw_simple_bbox(image, bbox, (0, 255, 0), 2)  # Green color
+
+            # # Add label ID text
+            # cv2.putText(image, f"GT:{label_id}", (x1, y1 - 5),
+            #             cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+
         # Network predictions (blue) - now with larger boxes (same size as old labels)
         for _, row in predictions_df.iterrows():
             range_m, azimuth_deg = row['range_m'], row['azimuth_deg']
@@ -196,10 +224,11 @@ class TrackingVisualizationTool:
                 u2, v2 = int(u2 / 2), int(v2 / 2)
 
                 bbox = (u1, v1, u2, v2)
-                image = draw_simple_bbox(image, bbox, (255, 0, 0), 1)  # Red, medium thickness
+                image = draw_simple_bbox(image, bbox, (255, 0, 0), 1, fill_color=(255, 0, 0),
+                                         fill_alpha=0.3)  # Red, medium thickness with fill
 
-                # Add track flag
-                image = add_track_flag(image, bbox, track_id)
+                # # Add track flag
+                # image = add_track_flag(image, bbox, track_id)
 
         return image
 
@@ -346,9 +375,13 @@ class TrackingVisualizationTool:
         if sample_labels.empty:
             return None, None
 
-        # Convert timestamp from microseconds to seconds
-        timestamp_us = sample_labels.iloc[0]['timestamp_us']
-        timestamp = timestamp_us / 1_000_000.0  # Convert to seconds
+        # Check if timestamp_us column exists in new format
+        if 'timestamp_us' in sample_labels.columns:
+            timestamp_us = sample_labels.iloc[0]['timestamp_us']
+            timestamp = timestamp_us / 1_000_000.0  # Convert to seconds
+        else:
+            # New format might not have timestamp, return None
+            return None, None
 
         # Calculate time gap from previous sample
         time_gap = None
@@ -412,9 +445,11 @@ def create_tracking_video(data_dir: Path, output_dir: Path, labels_csv: str,
         cmd = [
             "ffmpeg", "-y", "-framerate", "5",
             "-i", str(frames_dir / "frame_%06d.png"),
-            "-vf", "scale=iw-mod(iw\\,2):ih-mod(ih\\,2)",
+            "-b:v", "600k",
+            "-vf", "scale=2160:-2",
+            "-preset", "fast",
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-crf", "18", str(video_path)
+            str(video_path)
         ]
         subprocess.run(cmd, check=True, capture_output=True)
         print(f"Enhanced video created: {video_path}")
