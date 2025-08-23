@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 import motmetrics as mm
 import json
+import csv
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
 
@@ -595,6 +596,22 @@ class TrackingDetectionEvaluator:
         with open(details_path, 'w') as f:
             json.dump({'frame_by_frame_results': report['frame_by_frame_results']}, f, indent=2, default=str)
 
+        # Save CSV file
+        csv_path = output_path.parent / f"{output_path.stem}_metrics.csv"
+
+        # Find tracking.csv in parent directories
+        tracking_csv_path = output_path.parent.parent / 'tracks' / 'tracking.csv'
+        tracking_csv_path = str(tracking_csv_path)
+
+        csv_data = self._generate_csv_data(report, tracking_csv_path=tracking_csv_path)
+
+        with open(csv_path, 'w', newline='') as csvfile:
+            fieldnames = ['Sample', 'Type', 'TP', 'TN', 'FP', 'FN', 'IoU', 'timestamp', 'T']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            writer.writerows(csv_data)
+
     def save_text_report(self, output_path: str):
         """Save human-readable text report."""
         report = self.generate_comprehensive_report()
@@ -759,6 +776,149 @@ class TrackingDetectionEvaluator:
             f.write("- Filtered: Only CVPR labels (cvpr_updated=True)\n")
             f.write("- All Labels: All labels regardless of cvpr_updated flag\n")
 
+    def _generate_csv_data(self, report, include_network_detection: bool = False, threshold: float = 0.3,
+                           tracking_csv_path: str = None):
+        """Generate CSV data from frame-by-frame results.
+
+        Args:
+            report: Comprehensive report dictionary
+            include_network_detection: Whether to include network detection rows
+            threshold: IoU threshold for TP/FP classification (default: 0.3)
+            tracking_csv_path: Path to tracking.csv file for timestamp and track_id data
+
+        Returns:
+            List of dictionaries for CSV rows
+        """
+        csv_rows = []
+
+        # Load tracking data if path provided
+        tracking_data = {}
+        if tracking_csv_path and Path(tracking_csv_path).exists():
+            tracking_df = pd.read_csv(tracking_csv_path)
+            # Group by frame_id for easy lookup
+            for frame_id in tracking_df['frame_id'].unique():
+                frame_tracks = tracking_df[tracking_df['frame_id'] == frame_id]
+                tracking_data[frame_id] = {
+                    'timestamp': frame_tracks['timestamp'].iloc[0] if not frame_tracks.empty else None,
+                    'tracks': frame_tracks[['track_id', 'range_m', 'azimuth_deg']].to_dict('records')
+                }
+
+        for frame_data in report.get('frame_by_frame_results', []):
+            frame_id = frame_data['frame_id']
+            threshold_metrics = frame_data.get('camera_iou_results', {}).get('threshold_metrics', {})
+
+            # Get metrics for specified threshold
+            metrics = threshold_metrics.get(threshold, {})
+            if not metrics:
+                # Fallback to closest available threshold
+                available_thresholds = sorted(threshold_metrics.keys())
+                if available_thresholds:
+                    closest_threshold = min(available_thresholds, key=lambda x: abs(x - threshold))
+                    metrics = threshold_metrics[closest_threshold]
+
+            # Process network detections if enabled
+            if include_network_detection:
+                self._add_detection_rows(
+                    csv_rows,
+                    frame_data,
+                    frame_id,
+                    metrics,
+                    threshold,
+                    detection_type='Network Detection',
+                    tracking_data=tracking_data
+                )
+
+            # Process tracking/corrector data
+            self._add_tracking_rows(
+                csv_rows,
+                frame_data,
+                frame_id,
+                metrics,
+                threshold,
+                detection_type='Corrector',
+                tracking_data=tracking_data
+            )
+
+        return csv_rows
+
+    def _add_detection_rows(self, csv_rows, frame_data, frame_id, metrics, threshold, detection_type,
+                            tracking_data=None):
+        """Add detection rows to CSV data."""
+        detection_ious = frame_data.get('camera_iou_results', {}).get('detection_vs_labels_ious', [])
+        detection_fn = metrics.get('detection_fn', 0)
+
+        # Get timestamp from tracking data
+        timestamp = tracking_data.get(frame_id, {}).get('timestamp', None) if tracking_data else None
+
+        # Add row for each detection
+        for iou in detection_ious:
+            csv_rows.append({
+                'Sample': frame_id,
+                'Type': detection_type,
+                'TP': 1 if iou >= threshold else 0,
+                'TN': 0,
+                'FP': 1 if iou < threshold else 0,
+                'FN': 0,
+                'IoU': round(iou, 6),
+                'timestamp': timestamp,
+                'T': None  # Detections don't have track_ids
+            })
+
+        # Add FN row if there are unmatched ground truth objects
+        if detection_fn > 0:
+            csv_rows.append({
+                'Sample': frame_id,
+                'Type': detection_type,
+                'TP': 0,
+                'TN': 0,
+                'FP': 0,
+                'FN': detection_fn,
+                'IoU': 0.0,
+                'timestamp': timestamp,
+                'T': None
+            })
+
+    def _add_tracking_rows(self, csv_rows, frame_data, frame_id, metrics, threshold, detection_type,
+                           tracking_data=None):
+        """Add tracking rows to CSV data."""
+        tracking_ious = frame_data.get('camera_iou_results', {}).get('tracking_vs_labels_ious', [])
+        tracking_fn = metrics.get('tracking_fn', 0)
+
+        # Get frame tracking info
+        frame_tracking_info = tracking_data.get(frame_id, {}) if tracking_data else {}
+        timestamp = frame_tracking_info.get('timestamp', None)
+        frame_tracks = frame_tracking_info.get('tracks', [])
+
+        # Add row for each track with IoU
+        for idx, iou in enumerate(tracking_ious):
+            # Match track by index (assuming order is preserved)
+            track_id = frame_tracks[idx]['track_id'] if idx < len(frame_tracks) else None
+
+            csv_rows.append({
+                'Sample': frame_id,
+                'Type': detection_type,
+                'TP': 1 if iou >= threshold else 0,
+                'TN': 0,
+                'FP': 1 if iou < threshold else 0,
+                'FN': 0,
+                'IoU': round(iou, 6),
+                'timestamp': timestamp,
+                'T': track_id
+            })
+
+        # Add FN row if there are unmatched ground truth objects
+        if tracking_fn > 0:
+            csv_rows.append({
+                'Sample': frame_id,
+                'Type': detection_type,
+                'TP': 0,
+                'TN': 0,
+                'FP': 0,
+                'FN': tracking_fn,
+                'IoU': 0.0,
+                'timestamp': timestamp,
+                'T': None
+            })
 
 def evaluate_tracking_sequence(predictions_csv: str, ground_truth_csv: str,
                              tracking_csv: str, output_dir: str,
