@@ -8,7 +8,7 @@
 # =============================================================================
 tracking:
   # Processing options
-  create_video: false # Create video output
+  create_video: true # Create video output
   max_video_samples: null  # null = no limit, integer = limit samples
   max_frames: null  # null = all frames, integer = limit for debugging
   save_visualizations: false  # Global control for all visualizations
@@ -81,7 +81,7 @@ tracking:
     max_distance_threshold: 2.0  # Distance threshold for valid associations in evaluation (meters) default: 2.0
     use_cvpr_labels_only: true  # Use only CVPR updated labels for range-azimuth evaluation (PRECISION ONLY)
     use_camera_fov_filter: true  # Filter detections/tracks to camera FOV during evaluation
-    iou_thresholds: [0.3, 0.5]  # List of IoU thresholds for evaluation metrics
+    iou_thresholds: [0.1, 0.2, 0.3, 0.5, 0.7]  # List of IoU thresholds for evaluation metrics
     # Note: Camera has ~56.3° horizontal FOV but is positioned 1.384m behind radar,
     # so effective FOV at radar position varies with range (closer objects have narrower effective FOV)
 

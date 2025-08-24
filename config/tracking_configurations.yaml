@@ -201,7 +201,6 @@ configurations:
   adaptive_assoc_linear:
     description: "Adaptive R in association with linear weighting"
     overrides:
-      create_video: false
       use_adaptive_r_in_association: true
       use_adaptive_r_in_update: false
       r_weighting_strategy: "linear"
