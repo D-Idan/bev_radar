@@ -290,13 +290,10 @@ class CameraIoUCalculator:
                     ncle = self.calculate_ncle(pred_bbox, label_bbox, image_shape)
                     min_ncle = min(min_ncle, ncle)
 
-            results['detection_vs_labels_ious'].append(max_iou)
-
-            # Add NCLE (use 1.0 if no match above threshold)
-            if min_ncle < float('inf'):
-                results['detection_ncles'].append(min_ncle)
-            else:
-                results['detection_ncles'].append(1.0)  # Max normalized error
+                # Only add NCLE for matched pairs (above threshold)
+                if min_ncle < float('inf'):
+                    results['detection_ncles'].append(min_ncle)
+                # Don't add anything for unmatched predictions
 
             # Count TP/FP for each threshold
             for threshold in self.iou_thresholds:
@@ -336,11 +333,10 @@ class CameraIoUCalculator:
 
                     results['tracking_vs_labels_ious'].append(max_iou)
 
-                    # Add NCLE
+                    # Only add NCLE for matched pairs (above threshold)
                     if min_ncle < float('inf'):
                         results['tracking_ncles'].append(min_ncle)
-                    else:
-                        results['tracking_ncles'].append(1.0)
+                    # Don't add anything for unmatched tracks
 
                     # Count TP/FP for each threshold
                     for threshold in self.iou_thresholds:

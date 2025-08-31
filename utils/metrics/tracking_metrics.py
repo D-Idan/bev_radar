@@ -559,12 +559,17 @@ class TrackingDetectionEvaluator:
             'detection_ncle': {
                 'mean': float(np.mean(all_detection_ncles)) if all_detection_ncles else 0.0,
                 'std': float(np.std(all_detection_ncles)) if all_detection_ncles else 0.0,
-                'count': len(all_detection_ncles)
+                'count': len(all_detection_ncles),
+                'matched_ratio': len(all_detection_ncles) / max(1, sum(
+                    len(r['camera_iou_results'].get('detection_vs_labels_ious', [])) for r in self.frame_results))
             },
             'tracking_ncle': {
                 'mean': float(np.mean(all_tracking_ncles)) if all_tracking_ncles else 0.0,
                 'std': float(np.std(all_tracking_ncles)) if all_tracking_ncles else 0.0,
-                'count': len(all_tracking_ncles)
+                'count': len(all_tracking_ncles),
+                'matched_ratio': len(all_tracking_ncles) / max(1, sum(
+                    len(r['camera_iou_results'].get('tracking_vs_labels_ious', [])) for r in self.frame_results if
+                    r['camera_iou_results'].get('tracking_vs_labels_ious')))
             },
             'detection_tp_fp': {
                 'true_positives': total_detection_tp,
@@ -742,7 +747,7 @@ class TrackingDetectionEvaluator:
             ncle_improvement = ((det_ncle - track_ncle) / det_ncle * 100) if det_ncle > 0 else 0
 
             f.write(
-                f"{'NCLE':<20} {det_ncle:<15.4f} {track_ncle:<15.4f} {ncle_improvement:>+13.1f}% {'All Labels':<15}\n")
+                f"{'NCLE (matched only)':<20} {det_ncle:<15.4f} {track_ncle:<15.4f} {ncle_improvement:>+13.1f}% {'IoU≥threshold':<15}\n")
 
             # Calculate TP improvement (higher is better)
             det_tp = metrics['detection_tp']
