@@ -1,5 +1,6 @@
 digraph CompactPipeline {
-    rankdir=RD;
+    // rankdir=RD;
+    rankdir=LR;
     node [shape=box, style=filled, fontname="Times-Roman", fontsize=12];
     edge [fontname="Times-Roman", fontsize=11, penwidth=2];
     

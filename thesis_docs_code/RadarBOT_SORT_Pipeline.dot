@@ -25,20 +25,18 @@ digraph RadarBOT_SORT_Pipeline {
         color=gray;
         bgcolor=lightcyan;
 
-        Tracker [label="RadarBOT-SORT Tracker", fillcolor=salmon];
-        EnhancedSORT [label="Enhanced SORT Tracking", shape=plaintext, fillcolor=none, fontcolor=gray];  // Invisible node for branching
+        Tracker [label="RadarSORT", fillcolor=salmon];
+        EnhancedSORT [label="RadarSORT Features", shape=plaintext, fillcolor=none, fontcolor=gray];  // Invisible node for branching
         
         // Branches for contributions
-        Confidence [label="Confidence Integration", fillcolor=lightcoral];
-        AdaptiveR [label="Adaptive R Matrix\nin Kalman Filter", fillcolor=lightcoral];
+        Confidence [label="NN Confidence Integration", fillcolor=lightcoral];
+        AdaptiveR [label="Adaptive R Matrix", fillcolor=lightcoral];
         RadarFeatures [label="Radar-Specific Features", fillcolor=lightcoral];
-        StatisticalAssociation [label="Statistical Association", fillcolor=lightcoral];
         
         Tracker -> EnhancedSORT [style=invis];  // Invisible edge to position branches
         EnhancedSORT -> Confidence [dir=none, style=dotted];
         EnhancedSORT -> AdaptiveR [dir=none, style=dotted];
         EnhancedSORT -> RadarFeatures [dir=none, style=dotted];
-        EnhancedSORT -> StatisticalAssociation [dir=none, style=dotted];
         
         FinalTracks [label="Final Object Tracks", fillcolor=palegreen];
         Tracker -> FinalTracks;
