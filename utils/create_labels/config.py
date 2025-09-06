@@ -5,9 +5,12 @@ from pathlib import Path
 
 # Paths
 # INPUT_FOLDER = Path("path/to/your/images")  # Change this to your image folder
-# INPUT_FOLDER = Path("/Volumes/ELEMENTS/datasets/radial/RadIal_Data/RECORD@2020-11-21_11.54.31/camera")  # Change this to your image folder
-INPUT_FOLDER = Path("/mnt/data/datasets/radial/gd/raw_data/RadIal_Data/RECORD@2020-11-21_11.54.31/camera")  # Change this to your image folder
+INPUT_FOLDER = Path("/Volumes/ELEMENTS/datasets/radial/RadIal_Data/RECORD@2020-11-21_11.54.31/camera")  # Change this to your image folder
+# INPUT_FOLDER = Path("/mnt/data/datasets/radial/gd/raw_data/RadIal_Data/RECORD@2020-11-21_11.54.31/camera")  # Change this to your image folder
 OUTPUT_CSV = INPUT_FOLDER / "new_labels.csv"
+
+LABELS_CVPR_FILE = INPUT_FOLDER.parents[2] / "labels_CVPR.csv"  # Original labels file for reference
+LABELS_FILE = INPUT_FOLDER.parents[0] / "labels.csv"  # Original labels file for reference
 
 # Model settings
 MODEL_NAME = "yolov8m.pt"
