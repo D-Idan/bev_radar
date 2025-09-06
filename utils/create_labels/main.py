@@ -71,9 +71,14 @@ def process_images_with_tracking(
         sample_num = extract_sample_number(filename)
 
         # Save visualization if requested
-        if save_viz and detections:
+        if save_viz:
             viz_path = os.path.join(VISUALIZATION_FOLDER, filename)
-            draw_bounding_boxes(image_path, detections, viz_path)
+            if detections:
+                draw_bounding_boxes(image_path, detections, viz_path)
+            else:
+                # Save original image without any annotations
+                import shutil
+                shutil.copy2(image_path, viz_path)
 
         # Add each detection as a row
         for det in detections:
@@ -174,9 +179,14 @@ def process_images_without_tracking(
             global_id += 1
 
         # Save visualization if requested
-        if save_viz and viz_detections:
+        if save_viz:
             viz_path = os.path.join(VISUALIZATION_FOLDER, filename)
-            draw_bounding_boxes(image_path, viz_detections, viz_path)
+            if viz_detections:
+                draw_bounding_boxes(image_path, viz_detections, viz_path)
+            else:
+                # Save original image without any annotations
+                import shutil
+                shutil.copy2(image_path, viz_path)
 
         # If no detections, add empty row
         if not detections:
